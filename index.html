@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>Escultura AR — Crisia</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000; overflow: hidden; font-family: sans-serif; }
+    #ui {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; z-index: 100;
+      background: rgba(0,0,0,0.88); color: white;
+    }
+    #ui h1 { font-size: 22px; font-weight: 300; letter-spacing: 4px; margin-bottom: 12px; }
+    #ui p  { font-size: 13px; color: rgba(255,255,255,0.6); margin-bottom: 32px;
+              text-align: center; max-width: 280px; line-height: 1.7; }
+    #startBtn {
+      padding: 14px 40px; border: 1px solid rgba(255,255,255,0.4);
+      background: transparent; color: white; font-size: 14px;
+      letter-spacing: 2px; cursor: pointer; border-radius: 2px; transition: all 0.3s;
+    }
+    #startBtn:hover { background: rgba(255,255,255,0.1); }
+    #status {
+      position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+      color: rgba(255,255,255,0.7); font-size: 13px; letter-spacing: 1px;
+      z-index: 50; background: rgba(0,0,0,0.4); padding: 8px 20px;
+      border-radius: 20px; pointer-events: none; transition: opacity 0.5s;
+    }
+    #status.hidden { opacity: 0; }
+  </style>
+</head>
+<body>
+
+<div id="ui">
+  <h1>ESCULTURA AR</h1>
+  <p>Aponte a câmera para o marcador sobre a escultura para ver a bolha.</p>
+  <button id="startBtn">INICIAR</button>
+</div>
+
+<div id="status">procurando escultura...</div>
+
+<script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.168.0/build/three.min.js"></script>
+
+<script>
+// ─── Shaders ────────────────────────────────────────────────────────────────
+// Usa a foto da escultura como máscara de forma.
+// O shader detecta as bordas da silhueta e aplica o efeito bolha nelas.
+
+const vertexShader = `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const fragmentShader = `
+  #extension GL_OES_standard_derivatives : enable
+  precision mediump float;
+
+  uniform sampler2D uMask;
+  uniform float uTime;
+  varying vec2 vUv;
+
+  void main() {
+    vec4 tex = texture2D(uMask, vUv);
+
+    // Detecta escultura: se tem canal alpha usa direto;
+    // senão detecta pela luminosidade (fundo branco = claro, alumínio = médio)
+    float sculpt;
+    if (tex.a < 0.95) {
+      sculpt = tex.a;
+    } else {
+      float lum = dot(tex.rgb, vec3(0.299, 0.587, 0.114));
+      sculpt = 1.0 - smoothstep(0.78, 0.96, lum);
+    }
+
+    if (sculpt < 0.02) { gl_FragColor = vec4(0.0); return; }
+
+    // Detecção de borda via derivadas (traça o contorno exato da escultura)
+    float dx = dFdx(sculpt);
+    float dy = dFdy(sculpt);
+    float edge = clamp(length(vec2(dx, dy)) * 10.0, 0.0, 1.0);
+
+    // Interior suavizado (para não ter borda dura interna)
+    float interior = sculpt * (1.0 - edge * 0.7);
+
+    float t = uTime;
+    float pulse  = 0.88 + 0.12 * sin(t * 1.6);
+    float pulse2 = 0.95 + 0.05 * sin(t * 3.0 + 0.9);
+
+    // Iridescência — thin film, levemente azulada
+    float phase = vUv.y * 3.5 + vUv.x * 1.2 + t * 0.38;
+    vec3 irid = vec3(
+      0.52 + 0.38 * sin(phase),
+      0.80 + 0.18 * sin(phase + 2.094),
+      0.94 + 0.06 * sin(phase + 4.189)
+    );
+    // Puxa para azul-água
+    irid = mix(vec3(0.65, 0.88, 0.97), irid, 0.42);
+
+    // Composição: borda brilhante + interior quase invisível
+    float rimAlpha      = edge    * sculpt * 0.62;
+    float interiorAlpha = interior * 0.045;
+    float alpha = (rimAlpha + interiorAlpha) * pulse * pulse2;
+    alpha = clamp(alpha, 0.0, 1.0);
+
+    gl_FragColor = vec4(irid * alpha, alpha);
+  }
+`;
+
+// ─── AR Setup ───────────────────────────────────────────────────────────────
+let mindarThree, bubbleMesh;
+const clock = new THREE.Clock();
+
+document.getElementById('startBtn').addEventListener('click', async () => {
+  document.getElementById('ui').style.display = 'none';
+  await initAR();
+});
+
+async function initAR() {
+  mindarThree = new window.MINDAR.IMAGE.MindARThree({
+    container: document.body,
+    imageTargetSrc: './targets.mind',
+    uiScanning: false,
+    uiLoading: false,
+  });
+
+  const { renderer, scene, camera } = mindarThree;
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+
+  // Carrega a máscara da escultura
+  const loader = new THREE.TextureLoader();
+  const maskTex = await new Promise(res => loader.load('./escultura-mask.png', res));
+  maskTex.minFilter = THREE.LinearFilter;
+
+  // Plano com proporção da escultura (largura ~0.45m, altura ~1.0m = proporção real)
+  // Ajuste widthMeters e heightMeters para bater com o tamanho real da chapa
+  const widthMeters  = 0.45;
+  const heightMeters = 1.00;
+  const geo = new THREE.PlaneGeometry(widthMeters, heightMeters, 1, 1);
+
+  const mat = new THREE.ShaderMaterial({
+    vertexShader,
+    fragmentShader,
+    uniforms: {
+      uMask: { value: maskTex },
+      uTime: { value: 0.0 },
+    },
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    blending: THREE.NormalBlending,
+    extensions: { derivatives: true },
+  });
+
+  bubbleMesh = new THREE.Mesh(geo, mat);
+  // Flutua 1.5cm acima da superfície da chapa
+  bubbleMesh.position.set(0, 0, 0.015);
+
+  const anchor = mindarThree.addAnchor(0);
+  anchor.group.add(bubbleMesh);
+
+  anchor.onTargetFound = () => {
+    const s = document.getElementById('status');
+    s.textContent = 'escultura detectada ✦';
+    s.classList.remove('hidden');
+    setTimeout(() => s.classList.add('hidden'), 2500);
+  };
+  anchor.onTargetLost = () => {
+    const s = document.getElementById('status');
+    s.textContent = 'procurando escultura...';
+    s.classList.remove('hidden');
+  };
+
+  await mindarThree.start();
+
+  renderer.setAnimationLoop(() => {
+    if (bubbleMesh) bubbleMesh.material.uniforms.uTime.value = clock.getElapsedTime();
+    renderer.render(scene, camera);
+  });
+}
+</script>
+
+</body>
+</html>

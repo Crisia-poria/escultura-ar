@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 700" width="400" height="700">
+  <!-- White background — essencial para tracking -->
+  <rect width="400" height="700" fill="white"/>
+
+  <!-- Border frame for tracking stability -->
+  <rect x="10" y="10" width="380" height="680" fill="none" stroke="black" stroke-width="8"/>
+  <rect x="20" y="20" width="360" height="660" fill="none" stroke="black" stroke-width="3"/>
+
+  <!-- Silhueta da escultura — forma humana orgânica, alto contraste -->
+  <path d="
+    M 200 60
+    C 230 60, 265 75, 260 105
+    C 255 130, 230 135, 235 160
+    C 240 185, 290 195, 295 230
+    C 300 265, 265 285, 260 310
+    C 255 335, 210 345, 210 375
+    C 210 405, 265 415, 270 445
+    C 275 475, 245 495, 240 520
+    C 235 545, 230 565, 230 585
+    C 230 605, 220 625, 200 630
+    C 180 625, 170 605, 170 585
+    C 170 565, 165 545, 160 520
+    C 155 495, 125 475, 130 445
+    C 135 415, 190 405, 190 375
+    C 190 345, 145 335, 140 310
+    C 135 285, 100 265, 105 230
+    C 110 195, 160 185, 165 160
+    C 170 135, 145 130, 140 105
+    C 135 75, 170 60, 200 60 Z
+  " fill="black" opacity="0.85"/>
+
+  <!-- Pattern points mirroring the sculpture perforations -->
+  <circle cx="200" cy="120" r="4" fill="white"/>
+  <circle cx="200" cy="140" r="4" fill="white"/>
+  <circle cx="200" cy="160" r="4" fill="white"/>
+  <circle cx="195" cy="180" r="3" fill="white"/>
+  <circle cx="205" cy="195" r="3" fill="white"/>
+
+  <!-- Bottom dots pattern -->
+  <circle cx="180" cy="600" r="3" fill="white"/>
+  <circle cx="190" cy="605" r="3" fill="white"/>
+  <circle cx="200" cy="607" r="3" fill="white"/>
+  <circle cx="210" cy="605" r="3" fill="white"/>
+  <circle cx="220" cy="600" r="3" fill="white"/>
+
+  <!-- Corner tracking markers -->
+  <rect x="30" y="30" width="40" height="40" fill="black"/>
+  <rect x="35" y="35" width="30" height="30" fill="white"/>
+  <rect x="40" y="40" width="20" height="20" fill="black"/>
+
+  <rect x="330" y="30" width="40" height="40" fill="black"/>
+  <rect x="335" y="35" width="30" height="30" fill="white"/>
+  <rect x="340" y="40" width="20" height="20" fill="black"/>
+
+  <rect x="30" y="630" width="40" height="40" fill="black"/>
+  <rect x="35" y="635" width="30" height="30" fill="white"/>
+  <rect x="40" y="640" width="20" height="20" fill="black"/>
+
+  <rect x="330" y="630" width="40" height="40" fill="black"/>
+  <rect x="335" y="635" width="30" height="30" fill="white"/>
+  <rect x="340" y="640" width="20" height="20" fill="black"/>
+</svg>

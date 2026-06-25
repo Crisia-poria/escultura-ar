@@ -210,15 +210,17 @@ renderer.setAnimationLoop((ts,frame)=>{
   mat.uniforms.uTime.value=clock.getElapsedTime();
 
   if (frame&&xrRef) {
-    // Auto-posiciona via hit-test na superfície detectada
-    if (hitSrc&&!placed) {
+    // Rastreamento contínuo — bolha segue a superfície apontada
+    if (hitSrc) {
       const hits=frame.getHitTestResults(hitSrc);
       if (hits.length>0) {
         const p=hits[0].getPose(xrRef);
         if (p) {
-          mesh.position.set(p.transform.position.x, p.transform.position.y+0.004, p.transform.position.z);
-          placed=true;
-          hitSrc.cancel(); hitSrc=null;
+          mesh.position.set(
+            p.transform.position.x,
+            p.transform.position.y+0.004,
+            p.transform.position.z
+          );
         }
       }
     }

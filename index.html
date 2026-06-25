@@ -28,16 +28,25 @@
 
     #status {
       position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
-      color: rgba(255,255,255,0.8); font-size: 13px; letter-spacing: 1px;
-      z-index: 200; background: rgba(0,0,0,0.5); padding: 8px 20px;
+      color: rgba(255,255,255,0.9); font-size: 13px; letter-spacing: 1px;
+      z-index: 200; background: rgba(0,0,0,0.6); padding: 8px 20px;
       border-radius: 20px; pointer-events: none; max-width: 90vw;
       text-align: center; white-space: pre-line;
     }
     #status.hidden { display: none; }
-
-    /* MindAR injects its own canvas — make sure it fills the screen */
     canvas { display: block; }
   </style>
+
+  <!-- importmap: resolve bare module specifiers for MindAR + Three.js -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+      "mindar-image-three": "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.module.prod.js"
+    }
+  }
+  </script>
 </head>
 <body>
 
@@ -49,206 +58,167 @@
 
 <div id="status" class="hidden"></div>
 
-<!-- Three.js UMD (must load before MindAR) -->
-<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
-<!-- MindAR image tracking (uses THREE global set above) -->
-<script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.2/dist/mindar-image-three.prod.js"></script>
+<script type="module">
+import * as THREE from 'three';
+import { MindARThree } from 'mindar-image-three';
 
-<script>
-(function () {
-  // ── helpers ──────────────────────────────────────────────────────────────
-  var ui      = document.getElementById('ui');
-  var btn     = document.getElementById('startBtn');
-  var statusEl = document.getElementById('status');
+// ── helpers ───────────────────────────────────────────────────────────────
+const ui       = document.getElementById('ui');
+const btn      = document.getElementById('startBtn');
+const statusEl = document.getElementById('status');
 
-  function showStatus(msg) {
-    statusEl.textContent = msg;
-    statusEl.classList.remove('hidden');
-  }
-  function hideStatus() {
-    statusEl.classList.add('hidden');
-  }
-  function fatal(msg) {
-    // show inside the UI so it's visible even before AR starts
-    showStatus(msg);
-    ui.style.display = 'flex';  // bring UI back if it was hidden
-    btn.disabled = false;
-    btn.textContent = 'TENTAR NOVAMENTE';
-  }
+function showStatus(msg) {
+  statusEl.textContent = msg;
+  statusEl.classList.remove('hidden');
+}
+function hideStatus() {
+  statusEl.classList.add('hidden');
+}
+function fatal(msg) {
+  showStatus(msg);
+  ui.style.display = 'flex';
+  btn.disabled = false;
+  btn.textContent = 'TENTAR NOVAMENTE';
+}
 
-  // ── guard: verify MindAR and Three.js loaded ──────────────────────────
-  if (typeof window.MINDAR === 'undefined' || typeof window.MINDAR.IMAGE === 'undefined') {
-    fatal('Erro: biblioteca MindAR não carregou.\nVerifique sua conexão e recarregue.');
+// ── GLSL ──────────────────────────────────────────────────────────────────
+const vertexShader = `
+varying vec2 vUv;
+void main() {
+  vUv = uv;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`;
+
+const fragmentShader = `
+#extension GL_OES_standard_derivatives : enable
+precision mediump float;
+uniform sampler2D uMask;
+uniform float uTime;
+varying vec2 vUv;
+void main() {
+  vec4 tex = texture2D(uMask, vUv);
+  float sculpt;
+  if (tex.a < 0.95) {
+    sculpt = tex.a;
+  } else {
+    float lum = dot(tex.rgb, vec3(0.299, 0.587, 0.114));
+    sculpt = 1.0 - smoothstep(0.78, 0.96, lum);
+  }
+  if (sculpt < 0.02) { gl_FragColor = vec4(0.0); return; }
+  float dx = dFdx(sculpt);
+  float dy = dFdy(sculpt);
+  float edge = clamp(length(vec2(dx, dy)) * 10.0, 0.0, 1.0);
+  float interior = sculpt * (1.0 - edge * 0.7);
+  float t = uTime;
+  float pulse  = 0.88 + 0.12 * sin(t * 1.6);
+  float pulse2 = 0.95 + 0.05 * sin(t * 3.0 + 0.9);
+  float phase = vUv.y * 3.5 + vUv.x * 1.2 + t * 0.38;
+  vec3 irid = vec3(
+    0.52 + 0.38 * sin(phase),
+    0.80 + 0.18 * sin(phase + 2.094),
+    0.94 + 0.06 * sin(phase + 4.189)
+  );
+  irid = mix(vec3(0.65, 0.88, 0.97), irid, 0.42);
+  float rimAlpha      = edge    * sculpt * 0.62;
+  float interiorAlpha = interior * 0.045;
+  float alpha = (rimAlpha + interiorAlpha) * pulse * pulse2;
+  alpha = clamp(alpha, 0.0, 1.0);
+  gl_FragColor = vec4(irid * alpha, alpha);
+}`;
+
+// ── button ────────────────────────────────────────────────────────────────
+btn.addEventListener('click', () => {
+  btn.disabled = true;
+  ui.style.display = 'none';
+  showStatus('solicitando câmera…');
+  startAR();
+});
+
+// ── camera permission test ────────────────────────────────────────────────
+async function startAR() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    fatal('Câmera não suportada neste navegador.\nUse Chrome ou Safari recentes.');
     return;
   }
-  if (typeof THREE === 'undefined') {
-    fatal('Erro: biblioteca Three.js não carregou.\nVerifique sua conexão e recarregue.');
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    stream.getTracks().forEach(t => t.stop());
+    showStatus('carregando AR…');
+    await initAR();
+  } catch(err) {
+    fatal('Câmera bloqueada: ' + (err.message || err.name) +
+          '\nPermita o acesso à câmera e tente novamente.');
+  }
+}
+
+// ── AR init ───────────────────────────────────────────────────────────────
+async function initAR() {
+  const clock = new THREE.Clock();
+
+  let mindarThree;
+  try {
+    mindarThree = new MindARThree({
+      container: document.body,
+      imageTargetSrc: './targets.mind',
+      uiScanning: false,
+      uiLoading: false,
+    });
+  } catch(e) {
+    fatal('Erro ao inicializar AR:\n' + e.message);
     return;
   }
 
-  // ── GLSL shaders ─────────────────────────────────────────────────────────
-  var vertexShader = [
-    'varying vec2 vUv;',
-    'void main() {',
-    '  vUv = uv;',
-    '  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);',
-    '}'
-  ].join('\n');
+  const { renderer, scene, camera } = mindarThree;
 
-  var fragmentShader = [
-    '#extension GL_OES_standard_derivatives : enable',
-    'precision mediump float;',
-    'uniform sampler2D uMask;',
-    'uniform float uTime;',
-    'varying vec2 vUv;',
-    'void main() {',
-    '  vec4 tex = texture2D(uMask, vUv);',
-    '  float sculpt;',
-    '  if (tex.a < 0.95) {',
-    '    sculpt = tex.a;',
-    '  } else {',
-    '    float lum = dot(tex.rgb, vec3(0.299, 0.587, 0.114));',
-    '    sculpt = 1.0 - smoothstep(0.78, 0.96, lum);',
-    '  }',
-    '  if (sculpt < 0.02) { gl_FragColor = vec4(0.0); return; }',
-    '  float dx = dFdx(sculpt);',
-    '  float dy = dFdy(sculpt);',
-    '  float edge = clamp(length(vec2(dx, dy)) * 10.0, 0.0, 1.0);',
-    '  float interior = sculpt * (1.0 - edge * 0.7);',
-    '  float t = uTime;',
-    '  float pulse  = 0.88 + 0.12 * sin(t * 1.6);',
-    '  float pulse2 = 0.95 + 0.05 * sin(t * 3.0 + 0.9);',
-    '  float phase = vUv.y * 3.5 + vUv.x * 1.2 + t * 0.38;',
-    '  vec3 irid = vec3(',
-    '    0.52 + 0.38 * sin(phase),',
-    '    0.80 + 0.18 * sin(phase + 2.094),',
-    '    0.94 + 0.06 * sin(phase + 4.189)',
-    '  );',
-    '  irid = mix(vec3(0.65, 0.88, 0.97), irid, 0.42);',
-    '  float rimAlpha      = edge    * sculpt * 0.62;',
-    '  float interiorAlpha = interior * 0.045;',
-    '  float alpha = (rimAlpha + interiorAlpha) * pulse * pulse2;',
-    '  alpha = clamp(alpha, 0.0, 1.0);',
-    '  gl_FragColor = vec4(irid * alpha, alpha);',
-    '}'
-  ].join('\n');
+  const loader = new THREE.TextureLoader();
+  loader.load(
+    './escultura-mask.png',
+    (maskTex) => {
+      maskTex.minFilter = THREE.LinearFilter;
 
-  // ── state ─────────────────────────────────────────────────────────────────
-  var mindarThree = null;
-  var bubbleMesh  = null;
-  var clock       = null;   // created lazily inside initAR
-
-  // ── button handler ────────────────────────────────────────────────────────
-  btn.addEventListener('click', function () {
-    btn.disabled = true;
-    ui.style.display = 'none';
-    showStatus('carregando…');
-    startAR();
-  });
-
-  // ── camera test → then AR ─────────────────────────────────────────────────
-  function startAR() {
-    // First test camera access explicitly so we get a clear error on failure
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      fatal('Câmera não suportada neste navegador.\nUse Chrome ou Safari recentes.');
-      return;
-    }
-
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
-      .then(function (stream) {
-        // Got permission — stop the test stream; MindAR will reopen it
-        stream.getTracks().forEach(function (t) { t.stop(); });
-        initAR();
-      })
-      .catch(function (err) {
-        fatal('Câmera bloqueada: ' + (err.message || err.name) +
-              '\nPermita o acesso à câmera e tente novamente.');
+      const geo = new THREE.PlaneGeometry(0.45, 1.00);
+      const mat = new THREE.ShaderMaterial({
+        vertexShader,
+        fragmentShader,
+        uniforms: {
+          uMask: { value: maskTex },
+          uTime: { value: 0.0 },
+        },
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        blending: THREE.NormalBlending,
+        extensions: { derivatives: true },
       });
-  }
 
-  // ── AR initialisation ─────────────────────────────────────────────────────
-  function initAR() {
-    try {
-      clock = new THREE.Clock();
+      const bubbleMesh = new THREE.Mesh(geo, mat);
+      bubbleMesh.position.set(0, 0, 0.015);
 
-      mindarThree = new window.MINDAR.IMAGE.MindARThree({
-        container: document.body,
-        imageTargetSrc: './targets.mind',
-        uiScanning: false,
-        uiLoading: false,
-      });
-    } catch (e) {
-      fatal('Erro ao inicializar AR:\n' + e.message);
-      return;
-    }
+      const anchor = mindarThree.addAnchor(0);
+      anchor.group.add(bubbleMesh);
 
-    var renderer = mindarThree.renderer;
-    var scene    = mindarThree.scene;
-    var camera   = mindarThree.camera;
+      anchor.onTargetFound = () => {
+        showStatus('escultura detectada ✦');
+        setTimeout(hideStatus, 2500);
+      };
+      anchor.onTargetLost = () => {
+        showStatus('procurando escultura…');
+      };
 
-    // load mask texture
-    var loader  = new THREE.TextureLoader();
-    loader.load(
-      './escultura-mask.png',
-      function (maskTex) {
-        maskTex.minFilter = THREE.LinearFilter;
-
-        var widthMeters  = 0.45;
-        var heightMeters = 1.00;
-        var geo = new THREE.PlaneGeometry(widthMeters, heightMeters);
-
-        var mat = new THREE.ShaderMaterial({
-          vertexShader:   vertexShader,
-          fragmentShader: fragmentShader,
-          uniforms: {
-            uMask: { value: maskTex },
-            uTime: { value: 0.0 },
-          },
-          transparent: true,
-          depthWrite:  false,
-          side:        THREE.DoubleSide,
-          blending:    THREE.NormalBlending,
-          extensions:  { derivatives: true },
-        });
-
-        bubbleMesh = new THREE.Mesh(geo, mat);
-        bubbleMesh.position.set(0, 0, 0.015);
-
-        var anchor = mindarThree.addAnchor(0);
-        anchor.group.add(bubbleMesh);
-
-        anchor.onTargetFound = function () {
-          showStatus('escultura detectada ✦');
-          setTimeout(hideStatus, 2500);
-        };
-        anchor.onTargetLost = function () {
+      mindarThree.start()
+        .then(() => {
           showStatus('procurando escultura…');
-        };
-
-        // start MindAR
-        mindarThree.start()
-          .then(function () {
-            hideStatus();
-            showStatus('procurando escultura…');
-            renderer.setAnimationLoop(function () {
-              if (bubbleMesh) {
-                bubbleMesh.material.uniforms.uTime.value = clock.getElapsedTime();
-              }
-              renderer.render(scene, camera);
-            });
-          })
-          .catch(function (e) {
-            fatal('Erro ao iniciar rastreamento:\n' + (e.message || String(e)));
+          renderer.setAnimationLoop(() => {
+            bubbleMesh.material.uniforms.uTime.value = clock.getElapsedTime();
+            renderer.render(scene, camera);
           });
-      },
-      undefined,   // progress callback
-      function (e) {
-        fatal('Erro ao carregar máscara da escultura.\nVerifique o arquivo escultura-mask.png.');
-      }
-    );
-  }
-
-}());
+        })
+        .catch(e => fatal('Erro ao iniciar rastreamento:\n' + (e.message || String(e))));
+    },
+    undefined,
+    () => fatal('Erro ao carregar máscara.\nVerifique o arquivo escultura-mask.png.')
+  );
+}
 </script>
 
 </body>

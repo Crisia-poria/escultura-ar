@@ -6,239 +6,100 @@
   <title>Escultura AR — Crisia</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #000; overflow: hidden; font-family: sans-serif; }
+    html, body { width: 100%; height: 100%; background: #000; font-family: sans-serif; }
 
-    #ui {
-      position: fixed; inset: 0;
-      display: flex; flex-direction: column; align-items: center;
-      justify-content: center; z-index: 100;
-      background: rgba(0,0,0,0.92); color: white;
+    model-viewer {
+      width: 100%;
+      height: 100vh;
+      background-color: transparent;
+      --poster-color: transparent;
     }
-    #ui h1 { font-size: 22px; font-weight: 300; letter-spacing: 4px; margin-bottom: 10px; }
-    #ui p  { font-size: 13px; color: rgba(255,255,255,0.6); margin-bottom: 28px;
-              text-align: center; max-width: 280px; line-height: 1.8; }
-    #startBtn {
+
+    /* Poster (tela antes do modelo carregar) */
+    #poster {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; z-index: 10;
+      background: rgba(0,0,0,0.92); color: white;
+      pointer-events: none;
+    }
+    #poster h1 { font-size: 22px; font-weight: 300; letter-spacing: 4px; margin-bottom: 10px; }
+    #poster p  { font-size: 13px; color: rgba(255,255,255,0.6); text-align: center;
+                  max-width: 260px; line-height: 1.8; margin-bottom: 28px; }
+
+    /* Botão AR customizado — aparece sobre o model-viewer */
+    #ar-button {
+      position: absolute; bottom: 48px; left: 50%; transform: translateX(-50%);
       padding: 14px 40px; border: 1px solid rgba(255,255,255,0.5);
-      background: transparent; color: white; font-size: 14px;
+      background: rgba(0,0,0,0.6); color: white; font-size: 14px;
       letter-spacing: 2px; cursor: pointer; border-radius: 2px;
       -webkit-tap-highlight-color: transparent;
+      display: none; /* model-viewer mostra quando AR está disponível */
     }
-    #startBtn:active { background: rgba(255,255,255,0.15); }
-    #startBtn:disabled { opacity: 0.4; cursor: default; }
 
-    #status {
-      position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
-      color: rgba(255,255,255,0.9); font-size: 13px; letter-spacing: 1px;
-      z-index: 200; background: rgba(0,0,0,0.55); padding: 8px 22px;
-      border-radius: 20px; pointer-events: none; max-width: 90vw;
-      text-align: center; white-space: pre-line;
+    /* Mensagem quando AR não é suportado */
+    #no-ar {
+      position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%);
+      color: rgba(255,255,255,0.6); font-size: 12px; letter-spacing: 1px;
+      text-align: center; max-width: 280px; display: none;
     }
-    #status.hidden { display: none; }
-
-    #tap-hint {
-      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      color: rgba(255,255,255,0.5); font-size: 13px; letter-spacing: 2px;
-      z-index: 200; pointer-events: none; text-align: center;
-      transition: opacity 0.5s;
-    }
-    #tap-hint.hidden { opacity: 0; }
-
-    canvas { display: block; }
   </style>
 
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://unpkg.com/three@0.150.0/build/three.module.js"
-    }
-  }
-  </script>
+  <!-- model-viewer — Google's official web component for 3D/AR -->
+  <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js"></script>
 </head>
 <body>
 
-<div id="ui">
-  <h1>ESCULTURA AR</h1>
-  <p>Aponte para a escultura.<br>Toque para ancorar a bolha.</p>
-  <button id="startBtn">INICIAR</button>
-</div>
+<model-viewer
+  id="mv"
+  src="./bubble.glb"
+  ar
+  ar-modes="webxr scene-viewer quick-look"
+  ar-scale="fixed"
+  ar-placement="floor"
+  camera-controls
+  auto-rotate
+  shadow-intensity="0"
+  exposure="1.2"
+  environment-image="neutral"
+  slot="poster"
+>
+  <!-- Tela inicial (poster) -->
+  <div id="poster" slot="poster">
+    <h1>ESCULTURA AR</h1>
+    <p>Aponte para a escultura.<br>Toque em AR para ver a bolha no mundo real.</p>
+  </div>
 
-<div id="status" class="hidden"></div>
-<div id="tap-hint" class="hidden">TOQUE NA ESCULTURA</div>
+  <!-- Botão AR customizado -->
+  <button id="ar-button" slot="ar-button">VER EM AR</button>
 
-<script type="module">
-import * as THREE from 'three';
+  <!-- Mensagem de fallback -->
+  <div id="no-ar" slot="ar-failure">
+    AR não disponível neste dispositivo
+  </div>
+</model-viewer>
 
-const ui      = document.getElementById('ui');
-const btn     = document.getElementById('startBtn');
-const statusEl = document.getElementById('status');
-const tapHint  = document.getElementById('tap-hint');
+<script>
+const mv = document.getElementById('mv');
 
-function showStatus(msg) { statusEl.textContent = msg; statusEl.classList.remove('hidden'); }
-function hideStatus()    { statusEl.classList.add('hidden'); }
-function fatal(msg)      { showStatus(msg); ui.style.display = 'flex'; btn.disabled = false; btn.textContent = 'TENTAR NOVAMENTE'; }
-
-// ── shaders ───────────────────────────────────────────────────────────────
-const vertexShader = `
-varying vec3 vNormal;
-varying vec3 vViewPos;
-varying vec2 vUv;
-void main() {
-  vUv = uv;
-  vNormal = normalize(normalMatrix * normal);
-  vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
-  vViewPos = -mvPos.xyz;
-  gl_Position = projectionMatrix * mvPos;
-}`;
-
-const fragmentShader = `
-precision mediump float;
-uniform float uTime;
-varying vec3 vNormal;
-varying vec3 vViewPos;
-varying vec2 vUv;
-void main() {
-  vec3 n = normalize(vNormal);
-  vec3 v = normalize(vViewPos);
-  float fresnel = pow(1.0 - abs(dot(n, v)), 2.5);
-
-  float pulse  = 0.88 + 0.12 * sin(uTime * 1.6);
-  float pulse2 = 0.95 + 0.05 * sin(uTime * 3.0 + 0.9);
-  float phase  = vUv.y * 4.0 + vUv.x * 1.5 + uTime * 0.4;
-
-  vec3 irid = vec3(
-    0.52 + 0.38 * sin(phase),
-    0.80 + 0.18 * sin(phase + 2.094),
-    0.94 + 0.06 * sin(phase + 4.189)
-  );
-  irid = mix(vec3(0.65, 0.88, 0.97), irid, 0.5);
-
-  float alpha = (fresnel * 0.7 + 0.03) * pulse * pulse2;
-  alpha = clamp(alpha, 0.0, 0.85);
-
-  gl_FragColor = vec4(irid * alpha, alpha);
-}`;
-
-// ── button ────────────────────────────────────────────────────────────────
-btn.addEventListener('click', () => {
-  btn.disabled = true;
-  showStatus('verificando suporte AR…');
-  startAR();
+// Mostrar poster até modelo carregar
+mv.addEventListener('load', () => {
+  document.getElementById('poster').style.display = 'none';
 });
 
-// ── WebXR init ────────────────────────────────────────────────────────────
-async function startAR() {
-  if (!navigator.xr) {
-    fatal('WebXR não suportado.\nUse Chrome no Android ou Safari no iOS 15.4+.');
-    return;
+// Mostrar botão AR quando disponível
+mv.addEventListener('ar-status', (e) => {
+  if (e.detail.status === 'session-started') {
+    document.getElementById('poster').style.display = 'none';
   }
-  const supported = await navigator.xr.isSessionSupported('immersive-ar').catch(()=>false);
-  if (!supported) {
-    fatal('AR não suportado neste dispositivo.\nRequer ARCore (Android) ou ARKit (iOS 15.4+).');
-    return;
+});
+
+// Se AR não for suportado, mostrar mensagem
+mv.addEventListener('ar-modes-changed', () => {
+  if (!mv.canActivateAR) {
+    document.getElementById('no-ar').style.display = 'block';
   }
-
-  let session;
-  try {
-    session = await navigator.xr.requestSession('immersive-ar', {
-      requiredFeatures: ['hit-test'],
-      optionalFeatures: ['dom-overlay'],
-      domOverlay: { root: document.body },
-    });
-  } catch(e) {
-    fatal('Erro ao iniciar AR:\n' + (e.message || String(e)));
-    return;
-  }
-
-  ui.style.display = 'none';
-  hideStatus();
-
-  // Three.js setup
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-  renderer.setPixelRatio(window.devicePixelRatio);
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.xr.enabled = true;
-  document.body.appendChild(renderer.domElement);
-
-  await renderer.xr.setSession(session);
-
-  const scene  = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
-
-  // Reticle (surface indicator)
-  const reticleGeo = new THREE.RingGeometry(0.04, 0.06, 32);
-  reticleGeo.applyMatrix4(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
-  const reticleMat = new THREE.MeshBasicMaterial({ color: 0xaaddff, side: THREE.DoubleSide, transparent: true, opacity: 0.7 });
-  const reticle = new THREE.Mesh(reticleGeo, reticleMat);
-  reticle.matrixAutoUpdate = false;
-  reticle.visible = false;
-  scene.add(reticle);
-
-  // Bubble (iridescent sphere)
-  const bubbleGeo = new THREE.SphereGeometry(0.12, 64, 64);
-  const bubbleMat = new THREE.ShaderMaterial({
-    vertexShader,
-    fragmentShader,
-    uniforms: { uTime: { value: 0 } },
-    transparent: true,
-    depthWrite: false,
-    side: THREE.DoubleSide,
-    blending: THREE.NormalBlending,
-  });
-  const bubble = new THREE.Mesh(bubbleGeo, bubbleMat);
-  bubble.visible = false;
-  scene.add(bubble);
-
-  // Hit test setup
-  let hitTestSource = null;
-  let hitTestSourceReady = false;
-  let refSpace = null;
-  let bubblePlaced = false;
-
-  session.addEventListener('end', () => {
-    hitTestSourceReady = false;
-    hitTestSource = null;
-  });
-
-  const viewerSpace = await session.requestReferenceSpace('viewer');
-  refSpace = await session.requestReferenceSpace('local');
-  hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
-  hitTestSourceReady = true;
-
-  tapHint.classList.remove('hidden');
-
-  // Tap to place
-  session.addEventListener('select', () => {
-    if (reticle.visible && !bubblePlaced) {
-      bubble.position.setFromMatrixPosition(reticle.matrix);
-      bubble.position.y += 0.12; // float above the surface
-      bubble.visible = true;
-      bubblePlaced = true;
-      reticle.visible = false;
-      tapHint.classList.add('hidden');
-      showStatus('bolha ancorada ✦');
-      setTimeout(hideStatus, 2500);
-    }
-  });
-
-  // Render loop
-  const clock = new THREE.Clock();
-  renderer.setAnimationLoop((timestamp, frame) => {
-    if (frame && hitTestSourceReady) {
-      const hits = frame.getHitTestResults(hitTestSource);
-      if (hits.length > 0 && !bubblePlaced) {
-        const pose = hits[0].getPose(refSpace);
-        reticle.visible = true;
-        reticle.matrix.fromArray(pose.transform.matrix);
-      } else if (!bubblePlaced) {
-        reticle.visible = false;
-      }
-    }
-    if (bubble.visible) {
-      bubbleMat.uniforms.uTime.value = clock.getElapsedTime();
-    }
-    renderer.render(scene, camera);
-  });
-}
+});
 </script>
 
 </body>

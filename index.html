@@ -170,12 +170,28 @@ const errEl=document.getElementById('err');
 
 async function startAR() {
   if (xrSess) return;
-  if (!navigator.xr){
-    errEl.textContent='WebXR não disponível neste navegador'; errEl.style.display='block'; return;
+
+  const ua=navigator.userAgent;
+  const isIOS=/iPhone|iPad|iPod/i.test(ua);
+  const isSafari=isIOS&&/Safari/i.test(ua)&&!/CriOS|FxiOS|EdgiOS/i.test(ua);
+
+  if (!navigator.xr) {
+    if (isIOS&&!isSafari) {
+      errEl.innerHTML='No iPhone: abra no <strong>Safari</strong>';
+    } else {
+      errEl.textContent='WebXR indisponível — tente no Quest Browser ou Chrome Android';
+    }
+    errEl.style.display='block'; return;
   }
+
   const ok=await navigator.xr.isSessionSupported('immersive-ar').catch(()=>false);
-  if (!ok){
-    errEl.textContent='AR não suportado neste dispositivo'; errEl.style.display='block'; return;
+  if (!ok) {
+    if (isSafari) {
+      errEl.innerHTML='Ative em Safari → Ajustes → Safari → Avançado → Recursos Experimentais → WebXR';
+    } else {
+      errEl.textContent='AR não suportado neste dispositivo';
+    }
+    errEl.style.display='block'; return;
   }
   try {
     xrSess=await navigator.xr.requestSession('immersive-ar',{

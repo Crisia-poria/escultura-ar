@@ -198,10 +198,9 @@ tapEl.addEventListener('click', ()=>{
   if (!navigator.xr){ showErr('WebXR indisponível — use Quest Browser'); return; }
   // requestSession como PRIMEIRA chamada no handler de click
   navigator.xr.requestSession('immersive-ar',{
-    requiredFeatures:['local-floor'],
-    optionalFeatures:['hit-test','dom-overlay','hand-tracking'],
-    domOverlay:{root:document.body}
-  }).then(setupSession).catch(e=>showErr(e.message||String(e)));
+    requiredFeatures:['local'],
+    optionalFeatures:['local-floor','hit-test','hand-tracking']
+  }).then(setupSession).catch(e=>{ alert('Erro: '+( e.message||String(e))); showErr(e.message||String(e)); });
 });
 
 // ── Loop ─────────────────────────────────────────────────────

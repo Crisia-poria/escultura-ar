@@ -15,33 +15,26 @@
       --poster-color: transparent;
     }
 
-    /* Poster (tela antes do modelo carregar) */
+    /* Overlay inicial */
     #poster {
-      position: absolute; inset: 0;
+      position: fixed; inset: 0;
       display: flex; flex-direction: column; align-items: center;
       justify-content: center; z-index: 10;
-      background: rgba(0,0,0,0.92); color: white;
-      pointer-events: none;
+      background: rgba(0,0,0,0.88); color: white;
+      pointer-events: none; transition: opacity 0.6s;
     }
+    #poster.hidden { opacity: 0; }
     #poster h1 { font-size: 22px; font-weight: 300; letter-spacing: 4px; margin-bottom: 10px; }
     #poster p  { font-size: 13px; color: rgba(255,255,255,0.6); text-align: center;
-                  max-width: 260px; line-height: 1.8; margin-bottom: 28px; }
+                  max-width: 260px; line-height: 1.8; }
 
-    /* Botão AR customizado — aparece sobre o model-viewer */
+    /* Botão AR (slot ar-button dentro do model-viewer) */
     #ar-button {
-      position: absolute; bottom: 48px; left: 50%; transform: translateX(-50%);
       padding: 14px 40px; border: 1px solid rgba(255,255,255,0.5);
-      background: rgba(0,0,0,0.6); color: white; font-size: 14px;
+      background: rgba(0,0,0,0.65); color: white; font-size: 13px;
       letter-spacing: 2px; cursor: pointer; border-radius: 2px;
       -webkit-tap-highlight-color: transparent;
-      display: none; /* model-viewer mostra quando AR está disponível */
-    }
-
-    /* Mensagem quando AR não é suportado */
-    #no-ar {
-      position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%);
-      color: rgba(255,255,255,0.6); font-size: 12px; letter-spacing: 1px;
-      text-align: center; max-width: 280px; display: none;
+      position: absolute; bottom: 48px; left: 50%; transform: translateX(-50%);
     }
   </style>
 
@@ -59,46 +52,38 @@
   ar-placement="floor"
   camera-controls
   auto-rotate
+  loading="eager"
+  reveal="auto"
   shadow-intensity="0"
   exposure="1.2"
   environment-image="neutral"
-  slot="poster"
 >
-  <!-- Tela inicial (poster) -->
-  <div id="poster" slot="poster">
-    <h1>ESCULTURA AR</h1>
-    <p>Aponte para a escultura.<br>Toque em AR para ver a bolha no mundo real.</p>
-  </div>
-
   <!-- Botão AR customizado -->
-  <button id="ar-button" slot="ar-button">VER EM AR</button>
+  <button id="ar-button" slot="ar-button">VER EM AR ✦</button>
 
-  <!-- Mensagem de fallback -->
-  <div id="no-ar" slot="ar-failure">
+  <!-- Fallback quando AR não disponível -->
+  <div id="no-ar" slot="ar-failure" style="position:absolute;bottom:20px;left:50%;transform:translateX(-50%);color:rgba(255,255,255,0.5);font-size:12px;letter-spacing:1px;">
     AR não disponível neste dispositivo
   </div>
 </model-viewer>
 
+<!-- Overlay inicial — fora do model-viewer -->
+<div id="poster">
+  <h1>ESCULTURA AR</h1>
+  <p>Aponte para a escultura.<br>Toque em <strong>VER EM AR</strong> para ver a bolha no mundo real.</p>
+</div>
+
 <script>
 const mv = document.getElementById('mv');
+const poster = document.getElementById('poster');
 
-// Mostrar poster até modelo carregar
 mv.addEventListener('load', () => {
-  document.getElementById('poster').style.display = 'none';
+  poster.classList.add('hidden');
+  setTimeout(() => poster.style.display = 'none', 600);
 });
 
-// Mostrar botão AR quando disponível
-mv.addEventListener('ar-status', (e) => {
-  if (e.detail.status === 'session-started') {
-    document.getElementById('poster').style.display = 'none';
-  }
-});
-
-// Se AR não for suportado, mostrar mensagem
-mv.addEventListener('ar-modes-changed', () => {
-  if (!mv.canActivateAR) {
-    document.getElementById('no-ar').style.display = 'block';
-  }
+mv.addEventListener('error', (e) => {
+  poster.querySelector('p').textContent = 'Erro ao carregar modelo: ' + (e.detail?.type || e);
 });
 </script>
 

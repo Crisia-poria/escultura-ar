@@ -118,7 +118,16 @@ const clock = new THREE.Clock();
 
 document.getElementById('startBtn').addEventListener('click', async () => {
   document.getElementById('ui').style.display = 'none';
-  await initAR();
+  const s = document.getElementById('status');
+  s.textContent = 'carregando...';
+  s.classList.remove('hidden');
+  try {
+    await initAR();
+  } catch(e) {
+    s.textContent = 'erro: ' + e.message;
+    s.classList.remove('hidden');
+    console.error(e);
+  }
 });
 
 async function initAR() {

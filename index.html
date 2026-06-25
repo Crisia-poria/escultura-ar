@@ -14,7 +14,7 @@
       pointer-events: none;
     }
     #label { color: rgba(140,200,255,0.45); font-size: 11px; letter-spacing: 3px; font-family: sans-serif; }
-    #ar-btn {
+    .ar-btn {
       pointer-events: all;
       padding: 14px 52px;
       border: 1px solid rgba(140,200,255,0.55);
@@ -22,21 +22,36 @@
       color: rgba(140,200,255,0.9);
       font-size: 13px; letter-spacing: 3px; font-family: sans-serif;
       cursor: pointer; border-radius: 2px; -webkit-tap-highlight-color: transparent;
+      text-decoration: none; display: inline-block; text-align: center;
     }
-    #ar-btn:active { background: rgba(80,150,255,0.2); }
-    #ar-btn:disabled { opacity: 0.35; cursor: default; }
+    .ar-btn:active { background: rgba(80,150,255,0.2); }
+    .ar-btn:disabled { opacity: 0.35; cursor: default; }
     #msg {
       position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
       color: rgba(140,200,255,0.45); font-size: 11px; letter-spacing: 2px;
       font-family: sans-serif; text-align: center; white-space: nowrap;
     }
+    /* model-viewer iOS fallback — invisível, só para Quick Look */
+    #mv-ios {
+      position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none;
+    }
   </style>
+  <!-- model-viewer apenas para iOS Quick Look -->
+  <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js"></script>
 </head>
 <body>
+
+<!-- iOS Quick Look via model-viewer (invisível) -->
+<model-viewer id="mv-ios"
+  src="./bubble.glb"
+  ar ar-modes="quick-look"
+  ar-scale="fixed"
+></model-viewer>
+
 <div id="msg">ESCULTURA AR — CRISIA</div>
 <div id="ui">
   <span id="label">toque na bolha para interagir</span>
-  <button id="ar-btn">VER EM AR ✦</button>
+  <button id="ar-btn" class="ar-btn">VER EM AR ✦</button>
 </div>
 
 <script type="importmap">
@@ -45,6 +60,10 @@
 
 <script type="module">
 import * as THREE from 'three';
+
+// ── Detecção de plataforma ────────────────────────────────────
+const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+const hasWebXR = !!navigator.xr;
 
 // ── Profile da escultura ──────────────────────────────────────
 const PROFILE = [
@@ -70,7 +89,7 @@ function interpProfile(t) {
 function buildGeometry() {
   const pos=[],nor=[],uv=[],idx=[];
   for (let i=0;i<=STACKS;i++) {
-    const t=i/STACKS, y=(t-0.5)*HEIGHT, [rx,rz]=interpProfile(t);
+    const t=i/STACKS,y=(t-0.5)*HEIGHT,[rx,rz]=interpProfile(t);
     const eps=0.005,[rxU,rzU]=interpProfile(Math.min(t+eps,1)),[rxD,rzD]=interpProfile(Math.max(t-eps,0));
     const drx=(rxU-rxD)/(2*eps*HEIGHT),drz=(rzU-rzD)/(2*eps*HEIGHT);
     for (let j=0;j<=SLICES;j++) {
@@ -94,7 +113,7 @@ function buildGeometry() {
 }
 
 // ── Renderer ──────────────────────────────────────────────────
-const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
+const renderer = new THREE.WebGLRenderer({antialias:true,alpha:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 renderer.setSize(innerWidth,innerHeight);
 renderer.xr.enabled = true;
@@ -107,184 +126,171 @@ scene.add(new THREE.AmbientLight(0xffffff,0.15));
 
 // ── Shader iridescente + interativo ──────────────────────────
 const mat = new THREE.ShaderMaterial({
-  transparent: true,
-  side: THREE.DoubleSide,
-  depthWrite: false,
+  transparent:true, side:THREE.DoubleSide, depthWrite:false,
   uniforms: {
-    uTime:      { value: 0 },
-    uTouchTime: { value: -99 },  // tempo do último toque
-    uHandDist:  { value: -1 },   // distância da mão (-1 = sem tracking)
-    uHue:       { value: 0 },    // deslocamento de matiz por toque
+    uTime:      {value:0},
+    uTouchTime: {value:-99},
+    uHandDist:  {value:-1},
+    uHue:       {value:0},
   },
-  vertexShader: `
-    varying vec3 vNormal;
-    varying vec3 vViewDir;
-    varying vec2 vUv;
-    void main() {
-      vUv = uv;
-      vNormal = normalize(normalMatrix * normal);
-      vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
-      vViewDir = normalize(-mvPos.xyz);
-      gl_Position = projectionMatrix * mvPos;
+  vertexShader:`
+    varying vec3 vNormal; varying vec3 vViewDir; varying vec2 vUv;
+    void main(){
+      vUv=uv; vNormal=normalize(normalMatrix*normal);
+      vec4 mvPos=modelViewMatrix*vec4(position,1.0);
+      vViewDir=normalize(-mvPos.xyz);
+      gl_Position=projectionMatrix*mvPos;
     }
   `,
-  fragmentShader: `
-    uniform float uTime;
-    uniform float uTouchTime;
-    uniform float uHandDist;
-    uniform float uHue;
-    varying vec3 vNormal;
-    varying vec3 vViewDir;
-    varying vec2 vUv;
+  fragmentShader:`
+    uniform float uTime,uTouchTime,uHandDist,uHue;
+    varying vec3 vNormal,vViewDir; varying vec2 vUv;
+    void main(){
+      vec3 N=normalize(vNormal),V=normalize(vViewDir);
+      float NdotV=abs(dot(N,V));
+      float fresnel=pow(1.0-NdotV,1.3);
 
-    void main() {
-      vec3 N = normalize(vNormal);
-      vec3 V = normalize(vViewDir);
-      float NdotV = abs(dot(N, V));
-      float fresnel = pow(1.0 - NdotV, 1.3);
+      float sinceTouch=uTime-uTouchTime;
+      float touchAlive=step(sinceTouch,2.5);
+      float touchDecay=max(0.0,1.0-sinceTouch*0.5);
+      float touchWave=sin(sinceTouch*14.0-vUv.y*10.0)*touchDecay*touchAlive*0.6;
+      float touchBoost=touchDecay*touchAlive;
 
-      // Efeito de toque: onda que se expande a partir do contato
-      float sinceTouch = uTime - uTouchTime;
-      float touchAlive = step(sinceTouch, 2.5);
-      float touchDecay = max(0.0, 1.0 - sinceTouch * 0.5);
-      float touchWave  = sin(sinceTouch * 14.0 - vUv.y * 10.0) * touchDecay * touchAlive * 0.6;
-      float touchBoost = touchDecay * touchAlive;
+      float handAlive=step(0.0,uHandDist)*step(uHandDist,0.18);
+      float handStrength=max(0.0,1.0-uHandDist*6.0)*handAlive;
+      float handWave=sin(uTime*18.0-vUv.y*12.0)*handStrength*0.7;
 
-      // Efeito de mão: ondulação contínua quando mão está próxima
-      float handAlive  = step(0.0, uHandDist) * step(uHandDist, 0.18);
-      float handStrength = max(0.0, 1.0 - uHandDist * 6.0) * handAlive;
-      float handWave   = sin(uTime * 18.0 - vUv.y * 12.0) * handStrength * 0.7;
-
-      float ripple = touchWave + handWave;
-
-      // Iridescência: matiz muda com ângulo + posição + tempo + interações
-      float phase = fresnel * 6.5 + vUv.y * 3.0 - uTime * 0.55
-                  + ripple * 2.5 + touchBoost * 3.0 + uHue;
-      vec3 iri = vec3(
-        0.5 + 0.5 * cos(phase),
-        0.5 + 0.5 * cos(phase + 2.094),
-        0.5 + 0.5 * cos(phase + 4.189)
+      float ripple=touchWave+handWave;
+      float phase=fresnel*6.5+vUv.y*3.0-uTime*0.55+ripple*2.5+touchBoost*3.0+uHue;
+      vec3 iri=vec3(
+        0.5+0.5*cos(phase),
+        0.5+0.5*cos(phase+2.094),
+        0.5+0.5*cos(phase+4.189)
       );
 
-      // Pulso base
-      float pulse = 0.5 + 0.5 * sin(uTime * 1.9);
-      float innerGlow = 0.5 + 0.5 * sin(uTime * 0.7 + vUv.y * 4.0);
+      float pulse=0.5+0.5*sin(uTime*1.9);
+      float innerGlow=0.5+0.5*sin(uTime*0.7+vUv.y*4.0);
 
-      vec3 col = iri * (0.15 + fresnel * 0.55)
-               + iri * pulse * fresnel * 0.5
-               + iri * touchBoost * 0.6
-               + iri * handStrength * 0.5
-               + vec3(0.3,0.6,1.0) * innerGlow * (1.0 - NdotV) * 0.12;
+      vec3 col=iri*(0.15+fresnel*0.55)
+              +iri*pulse*fresnel*0.5
+              +iri*touchBoost*0.6
+              +iri*handStrength*0.5
+              +vec3(0.3,0.6,1.0)*innerGlow*(1.0-NdotV)*0.12;
 
-      float alpha = 0.04 + fresnel * 0.6
-                  + pulse * fresnel * 0.25
-                  + touchBoost * 0.3
-                  + handStrength * 0.25;
-      alpha = clamp(alpha, 0.0, 0.92);
-
-      gl_FragColor = vec4(col, alpha);
+      float alpha=0.04+fresnel*0.6+pulse*fresnel*0.25+touchBoost*0.3+handStrength*0.25;
+      gl_FragColor=vec4(col,clamp(alpha,0.0,0.92));
     }
   `
 });
 
-// ── Mesh — deitada no plano XZ ────────────────────────────────
-const mesh = new THREE.Mesh(buildGeometry(), mat);
-mesh.rotation.x = -Math.PI / 2;
-mesh.position.set(0, 0.004, -0.85);
+const mesh=new THREE.Mesh(buildGeometry(),mat);
+mesh.rotation.x=-Math.PI/2;
+mesh.position.set(0,0.004,-0.85);
 scene.add(mesh);
 
-// ── Raycaster para toque/clique ───────────────────────────────
-const raycaster = new THREE.Raycaster();
-const pointer   = new THREE.Vector2();
-const clock     = new THREE.Clock();
-let hueStep = 0;
+// ── Raycaster ─────────────────────────────────────────────────
+const raycaster=new THREE.Raycaster(), pointer=new THREE.Vector2();
+const clock=new THREE.Clock();
+let hueStep=0;
 
 function onPointerDown(e) {
-  const x = e.clientX ?? e.touches?.[0]?.clientX;
-  const y = e.clientY ?? e.touches?.[0]?.clientY;
-  if (x == null) return;
-  pointer.x =  (x / innerWidth)  * 2 - 1;
-  pointer.y = -(y / innerHeight) * 2 + 1;
-  raycaster.setFromCamera(pointer, camera);
-  const hits = raycaster.intersectObject(mesh, false);
-  if (hits.length > 0) {
-    mat.uniforms.uTouchTime.value = clock.getElapsedTime();
-    hueStep += Math.PI * 0.72; // +130° de matiz por toque
-    mat.uniforms.uHue.value = hueStep;
+  if (e.target.closest('#ui')||e.target.closest('#mv-ios')) return;
+  const x=e.clientX??e.touches?.[0]?.clientX, y=e.clientY??e.touches?.[0]?.clientY;
+  if (x==null) return;
+  pointer.x=(x/innerWidth)*2-1; pointer.y=-(y/innerHeight)*2+1;
+  raycaster.setFromCamera(pointer,camera);
+  const hits=raycaster.intersectObject(mesh,false);
+  if (hits.length>0) {
+    mat.uniforms.uTouchTime.value=clock.getElapsedTime();
+    hueStep+=Math.PI*0.72;
+    mat.uniforms.uHue.value=hueStep;
   }
 }
-window.addEventListener('pointerdown', onPointerDown);
-window.addEventListener('touchstart', onPointerDown, { passive: true });
+window.addEventListener('pointerdown',onPointerDown);
+window.addEventListener('touchstart',onPointerDown,{passive:true});
 
-// ── AR ────────────────────────────────────────────────────────
-const btn = document.getElementById('ar-btn');
-navigator.xr?.isSessionSupported('immersive-ar').then(ok => {
-  if (!ok) { btn.textContent = 'AR indisponível'; btn.disabled = true; }
-});
+// ── Botão AR ─────────────────────────────────────────────────
+const btn=document.getElementById('ar-btn');
+let xrSession=null, xrRefSpace=null;
 
-let xrSession = null, xrRefSpace = null;
+if (isIOS) {
+  // iOS: dispara Quick Look via model-viewer
+  document.getElementById('label').textContent = 'iPhone: modo Quick Look';
+  btn.addEventListener('click', () => {
+    const mv = document.getElementById('mv-ios');
+    // Aciona o botão AR interno do model-viewer
+    const arBtn = mv.shadowRoot?.querySelector('button[slot="ar-button"]')
+                ?? mv.querySelector('[slot="ar-button"]');
+    if (arBtn) { arBtn.click(); return; }
+    // Fallback: ativa AR diretamente
+    mv.activateAR();
+  });
+} else if (!hasWebXR) {
+  btn.textContent = 'AR indisponível';
+  btn.disabled = true;
+  document.getElementById('label').textContent = 'navegador sem suporte WebXR';
+} else {
+  // WebXR (Quest 3, Android Chrome)
+  navigator.xr.isSessionSupported('immersive-ar').then(ok => {
+    if (!ok) { btn.textContent='AR indisponível'; btn.disabled=true; }
+  });
 
-btn.addEventListener('click', async () => {
-  if (xrSession) return;
-  try {
-    xrSession = await navigator.xr.requestSession('immersive-ar', {
-      requiredFeatures: ['local-floor'],
-      optionalFeatures: ['dom-overlay', 'hand-tracking'],
-      domOverlay: { root: document.body }
-    });
-    renderer.xr.setReferenceSpaceType('local-floor');
-    await renderer.xr.setSession(xrSession);
-    xrRefSpace = await xrSession.requestReferenceSpace('local-floor');
+  btn.addEventListener('click', async () => {
+    if (xrSession) return;
+    try {
+      xrSession = await navigator.xr.requestSession('immersive-ar', {
+        requiredFeatures: ['local-floor'],
+        optionalFeatures: ['dom-overlay','hand-tracking'],
+        domOverlay: {root: document.body}
+      });
+      renderer.xr.setReferenceSpaceType('local-floor');
+      await renderer.xr.setSession(xrSession);
+      xrRefSpace = await xrSession.requestReferenceSpace('local-floor');
 
-    mesh.rotation.x = 0;
-    mesh.position.set(0, 0.004, -0.85);
+      mesh.rotation.x=0;
+      mesh.position.set(0,0.004,-0.85);
 
-    xrSession.addEventListener('end', () => {
-      xrSession = null; xrRefSpace = null;
-      mat.uniforms.uHandDist.value = -1;
-      document.getElementById('ui').style.display = 'flex';
-      document.getElementById('msg').style.display = 'block';
-    });
-    document.getElementById('ui').style.display = 'none';
-    document.getElementById('msg').style.display = 'none';
-  } catch(e) {
-    alert('Erro AR: ' + e.message);
-  }
-});
-
-// ── Loop de renderização ──────────────────────────────────────
-const _handPos = new THREE.Vector3();
-
-renderer.setAnimationLoop((timestamp, frame) => {
-  const t = clock.getElapsedTime();
-  mat.uniforms.uTime.value = t;
-
-  // Hand tracking — Quest 3
-  if (frame && xrRefSpace) {
-    const session = renderer.xr.getSession();
-    let minDist = -1;
-    for (const src of session.inputSources) {
-      if (!src.hand) continue;
-      // ponta do dedo indicador
-      const tip = src.hand.get('index-finger-tip');
-      if (!tip) continue;
-      const pose = frame.getJointPose(tip, xrRefSpace);
-      if (!pose) continue;
-      const p = pose.transform.position;
-      _handPos.set(p.x, p.y, p.z);
-      const dist = _handPos.distanceTo(mesh.position);
-      if (minDist < 0 || dist < minDist) minDist = dist;
+      xrSession.addEventListener('end',()=>{
+        xrSession=null; xrRefSpace=null;
+        mat.uniforms.uHandDist.value=-1;
+        document.getElementById('ui').style.display='flex';
+        document.getElementById('msg').style.display='block';
+      });
+      document.getElementById('ui').style.display='none';
+      document.getElementById('msg').style.display='none';
+    } catch(e) {
+      alert('Erro AR: '+(e.message||e));
     }
-    mat.uniforms.uHandDist.value = minDist;
-  }
+  });
+}
 
-  renderer.render(scene, camera);
+// ── Loop ──────────────────────────────────────────────────────
+const _hp=new THREE.Vector3();
+renderer.setAnimationLoop((ts,frame)=>{
+  mat.uniforms.uTime.value=clock.getElapsedTime();
+  if (frame&&xrRefSpace) {
+    const sess=renderer.xr.getSession();
+    let minD=-1;
+    for (const src of sess.inputSources) {
+      if (!src.hand) continue;
+      const tip=src.hand.get('index-finger-tip');
+      if (!tip) continue;
+      const pose=frame.getJointPose(tip,xrRefSpace);
+      if (!pose) continue;
+      const p=pose.transform.position;
+      _hp.set(p.x,p.y,p.z);
+      const d=_hp.distanceTo(mesh.position);
+      if (minD<0||d<minD) minD=d;
+    }
+    mat.uniforms.uHandDist.value=minD;
+  }
+  renderer.render(scene,camera);
 });
 
-window.addEventListener('resize', () => {
-  camera.aspect = innerWidth/innerHeight;
+window.addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
+  renderer.setSize(innerWidth,innerHeight);
 });
 </script>
 </body>

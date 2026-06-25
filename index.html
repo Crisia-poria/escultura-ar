@@ -77,10 +77,14 @@
 const mv = document.getElementById('mv');
 const poster = document.getElementById('poster');
 
-mv.addEventListener('load', () => {
+function hidePoster() {
   poster.classList.add('hidden');
-  setTimeout(() => poster.style.display = 'none', 600);
-});
+  setTimeout(() => { poster.style.display = 'none'; }, 600);
+}
+
+// Se já carregou antes do listener ser registrado
+if (mv.loaded) { hidePoster(); }
+else { mv.addEventListener('load', hidePoster); }
 
 mv.addEventListener('error', (e) => {
   poster.querySelector('p').textContent = 'Erro ao carregar modelo: ' + (e.detail?.type || e);

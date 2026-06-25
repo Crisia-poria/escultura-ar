@@ -125,7 +125,7 @@ const mat=new THREE.ShaderMaterial({
       float decay=max(0.,1.-dt*.5)*alive;
       float tw=sin(dt*14.-vUv.y*10.)*decay*.65;
 
-      float hs=max(0.,1.-uHand*6.)*step(0.,uHand)*step(uHand,.18);
+      float hs=max(0.,1.-uHand*3.)*step(0.,uHand)*step(uHand,.35);
       float hw=sin(uTime*18.-vUv.y*12.)*hs*.7;
 
       float ph=f*6.5+vUv.y*3.-uTime*.55+(tw+hw)*2.5+decay*3.+uHue;
@@ -225,19 +225,23 @@ renderer.setAnimationLoop((ts,frame)=>{
       }
     }
 
-    // Hand tracking (Quest 3)
+    // Hand tracking (Quest 3) — distância horizontal XZ
     const sess=renderer.xr.getSession();
     let minD=-1;
     for (const src of sess.inputSources) {
       if (!src.hand) continue;
-      const tip=src.hand.get('index-finger-tip');
-      if (!tip) continue;
-      const pose=frame.getJointPose(tip,xrRef);
-      if (!pose) continue;
-      const p=pose.transform.position;
-      _hp.set(p.x,p.y,p.z);
-      const d=_hp.distanceTo(mesh.position);
-      if (minD<0||d<minD) minD=d;
+      // verifica múltiplas juntas da mão
+      for (const joint of ['index-finger-tip','middle-finger-tip','wrist']) {
+        const j=src.hand.get(joint);
+        if (!j) continue;
+        const pose=frame.getJointPose(j,xrRef);
+        if (!pose) continue;
+        const p=pose.transform.position;
+        // distância apenas no plano XZ (ignora altura da mão)
+        const dx=p.x-mesh.position.x, dz=p.z-mesh.position.z;
+        const d=Math.sqrt(dx*dx+dz*dz);
+        if (minD<0||d<minD) minD=d;
+      }
     }
     mat.uniforms.uHand.value=minD;
   }

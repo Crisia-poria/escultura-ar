@@ -32,7 +32,7 @@
   </style>
 </head>
 <body>
-<div id="tap"></div>
+<button id="tap" aria-label="iniciar"></button>
 <div id="err"></div>
 
 <script type="importmap">
@@ -148,89 +148,61 @@ const rc=new THREE.Raycaster(), pt=new THREE.Vector2();
 const clock=new THREE.Clock();
 let hue=0;
 
-function onTap(e) {
-  if (e.target===document.getElementById('tap')||e.target===document.body){
-    startAR(); return;
-  }
-  const x=e.clientX??e.touches?.[0]?.clientX??0;
-  const y=e.clientY??e.touches?.[0]?.clientY??0;
+// Toque na bolha (durante AR)
+window.addEventListener('click', e=>{
+  if (!xrSess) return;
+  const x=e.clientX, y=e.clientY;
   pt.x=(x/innerWidth)*2-1; pt.y=-(y/innerHeight)*2+1;
   rc.setFromCamera(pt,camera);
   if (rc.intersectObject(mesh,false).length){
     mat.uniforms.uTouch.value=clock.getElapsedTime();
     hue+=Math.PI*.72; mat.uniforms.uHue.value=hue;
   }
-}
-window.addEventListener('pointerdown',onTap);
+});
 
 // ── AR ───────────────────────────────────────────────────────
 let xrSess=null, xrRef=null, hitSrc=null, placed=false;
 const tapEl=document.getElementById('tap');
 const errEl=document.getElementById('err');
 
-// Verifica suporte em background (não bloqueia gesto)
-let arSupported = null;
-if (navigator.xr) {
-  navigator.xr.isSessionSupported('immersive-ar')
-    .then(ok=>{ arSupported=ok; })
-    .catch(()=>{ arSupported=false; });
-}
+function showErr(msg){ errEl.innerHTML=msg; errEl.style.display='block'; }
 
-async function startAR() {
-  if (xrSess) return;
-
-  const ua=navigator.userAgent;
-  const isIOS=/iPhone|iPad|iPod/i.test(ua);
-  const isSafari=isIOS&&/Safari/i.test(ua)&&!/CriOS|FxiOS|EdgiOS/i.test(ua);
-
-  if (!navigator.xr) {
-    errEl.innerHTML=isIOS&&!isSafari
-      ? 'No iPhone: abra no <strong>Safari</strong>'
-      : 'WebXR indisponível — use Quest Browser ou Chrome Android';
-    errEl.style.display='block'; return;
-  }
-
-  if (arSupported===false) {
-    errEl.innerHTML=isSafari
-      ? 'Ative: Safari → Ajustes → Avançado → Recursos Experimentais → WebXR'
-      : 'AR não suportado neste dispositivo';
-    errEl.style.display='block'; return;
-  }
-
-  // requestSession chamado diretamente no gesto do usuário
-  try {
-    xrSess=await navigator.xr.requestSession('immersive-ar',{
-      requiredFeatures:['local-floor'],
-      optionalFeatures:['hit-test','dom-overlay','hand-tracking'],
-      domOverlay:{root:document.body}
-    });
-    renderer.xr.setReferenceSpaceType('local-floor');
-    await renderer.xr.setSession(xrSess);
-    xrRef=await xrSess.requestReferenceSpace('local-floor');
-
-    // Hit-test: detecta superfície automaticamente
-    try {
-      const viewerSpace=await xrSess.requestReferenceSpace('viewer');
-      hitSrc=await xrSess.requestHitTestSource({space:viewerSpace});
-    } catch(_){}
-
-    // Posição inicial antes do hit-test confirmar
+function setupSession(session) {
+  xrSess=session;
+  renderer.xr.setReferenceSpaceType('local-floor');
+  renderer.xr.setSession(session).then(()=>
+    session.requestReferenceSpace('local-floor')
+  ).then(ref=>{
+    xrRef=ref;
+    return session.requestReferenceSpace('viewer')
+      .then(vs=>session.requestHitTestSource({space:vs}))
+      .catch(()=>null);
+  }).then(hs=>{
+    hitSrc=hs; placed=false;
     mesh.position.set(0,0.004,-0.85);
-    placed=false;
-
     tapEl.classList.add('hidden');
     renderer.domElement.style.display='block';
+  }).catch(e=>showErr(e.message));
 
-    xrSess.addEventListener('end',()=>{
-      xrSess=null; xrRef=null; hitSrc=null; placed=false;
-      mat.uniforms.uHand.value=-1;
-      renderer.domElement.style.display='none';
-      tapEl.classList.remove('hidden');
-    });
-  } catch(e){
-    errEl.textContent=e.message||'erro desconhecido'; errEl.style.display='block';
-  }
+  session.addEventListener('end',()=>{
+    xrSess=null; xrRef=null; hitSrc=null; placed=false;
+    mat.uniforms.uHand.value=-1;
+    renderer.domElement.style.display='none';
+    tapEl.classList.remove('hidden');
+  });
 }
+
+// Botão de AR — click direto sem async intermediário
+tapEl.addEventListener('click', ()=>{
+  if (xrSess) return;
+  if (!navigator.xr){ showErr('WebXR indisponível — use Quest Browser'); return; }
+  // requestSession como PRIMEIRA chamada no handler de click
+  navigator.xr.requestSession('immersive-ar',{
+    requiredFeatures:['local-floor'],
+    optionalFeatures:['hit-test','dom-overlay','hand-tracking'],
+    domOverlay:{root:document.body}
+  }).then(setupSession).catch(e=>showErr(e.message||String(e)));
+});
 
 // ── Loop ─────────────────────────────────────────────────────
 const _hp=new THREE.Vector3();

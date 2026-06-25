@@ -7,191 +7,246 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #000; overflow: hidden; font-family: sans-serif; }
+
     #ui {
-      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      position: fixed; inset: 0;
       display: flex; flex-direction: column; align-items: center;
       justify-content: center; z-index: 100;
-      background: rgba(0,0,0,0.88); color: white;
+      background: rgba(0,0,0,0.9); color: white;
     }
-    #ui h1 { font-size: 22px; font-weight: 300; letter-spacing: 4px; margin-bottom: 12px; }
-    #ui p  { font-size: 13px; color: rgba(255,255,255,0.6); margin-bottom: 32px;
+    #ui h1 { font-size: 22px; font-weight: 300; letter-spacing: 4px; margin-bottom: 10px; }
+    #ui p  { font-size: 13px; color: rgba(255,255,255,0.6); margin-bottom: 28px;
               text-align: center; max-width: 280px; line-height: 1.7; }
     #startBtn {
-      padding: 14px 40px; border: 1px solid rgba(255,255,255,0.4);
+      padding: 14px 40px; border: 1px solid rgba(255,255,255,0.5);
       background: transparent; color: white; font-size: 14px;
-      letter-spacing: 2px; cursor: pointer; border-radius: 2px; transition: all 0.3s;
+      letter-spacing: 2px; cursor: pointer; border-radius: 2px;
+      transition: background 0.3s; -webkit-tap-highlight-color: transparent;
     }
-    #startBtn:hover { background: rgba(255,255,255,0.1); }
+    #startBtn:active { background: rgba(255,255,255,0.15); }
+    #startBtn:disabled { opacity: 0.4; cursor: default; }
+
     #status {
       position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
-      color: rgba(255,255,255,0.7); font-size: 13px; letter-spacing: 1px;
-      z-index: 50; background: rgba(0,0,0,0.4); padding: 8px 20px;
-      border-radius: 20px; pointer-events: none; transition: opacity 0.5s;
+      color: rgba(255,255,255,0.8); font-size: 13px; letter-spacing: 1px;
+      z-index: 200; background: rgba(0,0,0,0.5); padding: 8px 20px;
+      border-radius: 20px; pointer-events: none; max-width: 90vw;
+      text-align: center; white-space: pre-line;
     }
-    #status.hidden { opacity: 0; }
+    #status.hidden { display: none; }
+
+    /* MindAR injects its own canvas — make sure it fills the screen */
+    canvas { display: block; }
   </style>
 </head>
 <body>
 
 <div id="ui">
   <h1>ESCULTURA AR</h1>
-  <p>Aponte a câmera para o marcador sobre a escultura para ver a bolha.</p>
+  <p>Aponte a câmera para o marcador sobre a escultura.</p>
   <button id="startBtn">INICIAR</button>
 </div>
 
-<div id="status">procurando escultura...</div>
+<div id="status" class="hidden"></div>
 
+<!-- MindAR bundle — includes Three.js internally -->
 <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"></script>
 
 <script>
-// ─── Shaders ────────────────────────────────────────────────────────────────
-// Usa a foto da escultura como máscara de forma.
-// O shader detecta as bordas da silhueta e aplica o efeito bolha nelas.
+(function () {
+  // ── helpers ──────────────────────────────────────────────────────────────
+  var ui      = document.getElementById('ui');
+  var btn     = document.getElementById('startBtn');
+  var statusEl = document.getElementById('status');
 
-const vertexShader = `
-  varying vec2 vUv;
-  void main() {
-    vUv = uv;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  function showStatus(msg) {
+    statusEl.textContent = msg;
+    statusEl.classList.remove('hidden');
   }
-`;
+  function hideStatus() {
+    statusEl.classList.add('hidden');
+  }
+  function fatal(msg) {
+    // show inside the UI so it's visible even before AR starts
+    showStatus(msg);
+    ui.style.display = 'flex';  // bring UI back if it was hidden
+    btn.disabled = false;
+    btn.textContent = 'TENTAR NOVAMENTE';
+  }
 
-const fragmentShader = `
-  #extension GL_OES_standard_derivatives : enable
-  precision mediump float;
+  // ── guard: verify MindAR and Three.js loaded ──────────────────────────
+  if (typeof window.MINDAR === 'undefined' || typeof window.MINDAR.IMAGE === 'undefined') {
+    fatal('Erro: biblioteca MindAR não carregou.\nVerifique sua conexão e recarregue.');
+    return;
+  }
+  if (typeof THREE === 'undefined') {
+    fatal('Erro: biblioteca Three.js não carregou.\nVerifique sua conexão e recarregue.');
+    return;
+  }
 
-  uniform sampler2D uMask;
-  uniform float uTime;
-  varying vec2 vUv;
+  // ── GLSL shaders ─────────────────────────────────────────────────────────
+  var vertexShader = [
+    'varying vec2 vUv;',
+    'void main() {',
+    '  vUv = uv;',
+    '  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);',
+    '}'
+  ].join('\n');
 
-  void main() {
-    vec4 tex = texture2D(uMask, vUv);
+  var fragmentShader = [
+    '#extension GL_OES_standard_derivatives : enable',
+    'precision mediump float;',
+    'uniform sampler2D uMask;',
+    'uniform float uTime;',
+    'varying vec2 vUv;',
+    'void main() {',
+    '  vec4 tex = texture2D(uMask, vUv);',
+    '  float sculpt;',
+    '  if (tex.a < 0.95) {',
+    '    sculpt = tex.a;',
+    '  } else {',
+    '    float lum = dot(tex.rgb, vec3(0.299, 0.587, 0.114));',
+    '    sculpt = 1.0 - smoothstep(0.78, 0.96, lum);',
+    '  }',
+    '  if (sculpt < 0.02) { gl_FragColor = vec4(0.0); return; }',
+    '  float dx = dFdx(sculpt);',
+    '  float dy = dFdy(sculpt);',
+    '  float edge = clamp(length(vec2(dx, dy)) * 10.0, 0.0, 1.0);',
+    '  float interior = sculpt * (1.0 - edge * 0.7);',
+    '  float t = uTime;',
+    '  float pulse  = 0.88 + 0.12 * sin(t * 1.6);',
+    '  float pulse2 = 0.95 + 0.05 * sin(t * 3.0 + 0.9);',
+    '  float phase = vUv.y * 3.5 + vUv.x * 1.2 + t * 0.38;',
+    '  vec3 irid = vec3(',
+    '    0.52 + 0.38 * sin(phase),',
+    '    0.80 + 0.18 * sin(phase + 2.094),',
+    '    0.94 + 0.06 * sin(phase + 4.189)',
+    '  );',
+    '  irid = mix(vec3(0.65, 0.88, 0.97), irid, 0.42);',
+    '  float rimAlpha      = edge    * sculpt * 0.62;',
+    '  float interiorAlpha = interior * 0.045;',
+    '  float alpha = (rimAlpha + interiorAlpha) * pulse * pulse2;',
+    '  alpha = clamp(alpha, 0.0, 1.0);',
+    '  gl_FragColor = vec4(irid * alpha, alpha);',
+    '}'
+  ].join('\n');
 
-    // Detecta escultura: se tem canal alpha usa direto;
-    // senão detecta pela luminosidade (fundo branco = claro, alumínio = médio)
-    float sculpt;
-    if (tex.a < 0.95) {
-      sculpt = tex.a;
-    } else {
-      float lum = dot(tex.rgb, vec3(0.299, 0.587, 0.114));
-      sculpt = 1.0 - smoothstep(0.78, 0.96, lum);
+  // ── state ─────────────────────────────────────────────────────────────────
+  var mindarThree = null;
+  var bubbleMesh  = null;
+  var clock       = null;   // created lazily inside initAR
+
+  // ── button handler ────────────────────────────────────────────────────────
+  btn.addEventListener('click', function () {
+    btn.disabled = true;
+    ui.style.display = 'none';
+    showStatus('carregando…');
+    startAR();
+  });
+
+  // ── camera test → then AR ─────────────────────────────────────────────────
+  function startAR() {
+    // First test camera access explicitly so we get a clear error on failure
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      fatal('Câmera não suportada neste navegador.\nUse Chrome ou Safari recentes.');
+      return;
     }
 
-    if (sculpt < 0.02) { gl_FragColor = vec4(0.0); return; }
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+      .then(function (stream) {
+        // Got permission — stop the test stream; MindAR will reopen it
+        stream.getTracks().forEach(function (t) { t.stop(); });
+        initAR();
+      })
+      .catch(function (err) {
+        fatal('Câmera bloqueada: ' + (err.message || err.name) +
+              '\nPermita o acesso à câmera e tente novamente.');
+      });
+  }
 
-    // Detecção de borda via derivadas (traça o contorno exato da escultura)
-    float dx = dFdx(sculpt);
-    float dy = dFdy(sculpt);
-    float edge = clamp(length(vec2(dx, dy)) * 10.0, 0.0, 1.0);
+  // ── AR initialisation ─────────────────────────────────────────────────────
+  function initAR() {
+    try {
+      clock = new THREE.Clock();
 
-    // Interior suavizado (para não ter borda dura interna)
-    float interior = sculpt * (1.0 - edge * 0.7);
+      mindarThree = new window.MINDAR.IMAGE.MindARThree({
+        container: document.body,
+        imageTargetSrc: './targets.mind',
+        uiScanning: false,
+        uiLoading: false,
+      });
+    } catch (e) {
+      fatal('Erro ao inicializar AR:\n' + e.message);
+      return;
+    }
 
-    float t = uTime;
-    float pulse  = 0.88 + 0.12 * sin(t * 1.6);
-    float pulse2 = 0.95 + 0.05 * sin(t * 3.0 + 0.9);
+    var renderer = mindarThree.renderer;
+    var scene    = mindarThree.scene;
+    var camera   = mindarThree.camera;
 
-    // Iridescência — thin film, levemente azulada
-    float phase = vUv.y * 3.5 + vUv.x * 1.2 + t * 0.38;
-    vec3 irid = vec3(
-      0.52 + 0.38 * sin(phase),
-      0.80 + 0.18 * sin(phase + 2.094),
-      0.94 + 0.06 * sin(phase + 4.189)
+    // load mask texture
+    var loader  = new THREE.TextureLoader();
+    loader.load(
+      './escultura-mask.png',
+      function (maskTex) {
+        maskTex.minFilter = THREE.LinearFilter;
+
+        var widthMeters  = 0.45;
+        var heightMeters = 1.00;
+        var geo = new THREE.PlaneGeometry(widthMeters, heightMeters);
+
+        var mat = new THREE.ShaderMaterial({
+          vertexShader:   vertexShader,
+          fragmentShader: fragmentShader,
+          uniforms: {
+            uMask: { value: maskTex },
+            uTime: { value: 0.0 },
+          },
+          transparent: true,
+          depthWrite:  false,
+          side:        THREE.DoubleSide,
+          blending:    THREE.NormalBlending,
+          extensions:  { derivatives: true },
+        });
+
+        bubbleMesh = new THREE.Mesh(geo, mat);
+        bubbleMesh.position.set(0, 0, 0.015);
+
+        var anchor = mindarThree.addAnchor(0);
+        anchor.group.add(bubbleMesh);
+
+        anchor.onTargetFound = function () {
+          showStatus('escultura detectada ✦');
+          setTimeout(hideStatus, 2500);
+        };
+        anchor.onTargetLost = function () {
+          showStatus('procurando escultura…');
+        };
+
+        // start MindAR
+        mindarThree.start()
+          .then(function () {
+            hideStatus();
+            showStatus('procurando escultura…');
+            renderer.setAnimationLoop(function () {
+              if (bubbleMesh) {
+                bubbleMesh.material.uniforms.uTime.value = clock.getElapsedTime();
+              }
+              renderer.render(scene, camera);
+            });
+          })
+          .catch(function (e) {
+            fatal('Erro ao iniciar rastreamento:\n' + (e.message || String(e)));
+          });
+      },
+      undefined,   // progress callback
+      function (e) {
+        fatal('Erro ao carregar máscara da escultura.\nVerifique o arquivo escultura-mask.png.');
+      }
     );
-    // Puxa para azul-água
-    irid = mix(vec3(0.65, 0.88, 0.97), irid, 0.42);
-
-    // Composição: borda brilhante + interior quase invisível
-    float rimAlpha      = edge    * sculpt * 0.62;
-    float interiorAlpha = interior * 0.045;
-    float alpha = (rimAlpha + interiorAlpha) * pulse * pulse2;
-    alpha = clamp(alpha, 0.0, 1.0);
-
-    gl_FragColor = vec4(irid * alpha, alpha);
   }
-`;
 
-// ─── AR Setup ───────────────────────────────────────────────────────────────
-let mindarThree, bubbleMesh;
-const clock = new THREE.Clock();
-
-document.getElementById('startBtn').addEventListener('click', async () => {
-  document.getElementById('ui').style.display = 'none';
-  const s = document.getElementById('status');
-  s.textContent = 'carregando...';
-  s.classList.remove('hidden');
-  try {
-    await initAR();
-  } catch(e) {
-    s.textContent = 'erro: ' + e.message;
-    s.classList.remove('hidden');
-    console.error(e);
-  }
-});
-
-async function initAR() {
-  mindarThree = new window.MINDAR.IMAGE.MindARThree({
-    container: document.body,
-    imageTargetSrc: './targets.mind',
-    uiScanning: false,
-    uiLoading: false,
-  });
-
-  const { renderer, scene, camera } = mindarThree;
-
-  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-
-  // Carrega a máscara da escultura
-  const loader = new THREE.TextureLoader();
-  const maskTex = await new Promise(res => loader.load('./escultura-mask.png', res));
-  maskTex.minFilter = THREE.LinearFilter;
-
-  // Plano com proporção da escultura (largura ~0.45m, altura ~1.0m = proporção real)
-  // Ajuste widthMeters e heightMeters para bater com o tamanho real da chapa
-  const widthMeters  = 0.45;
-  const heightMeters = 1.00;
-  const geo = new THREE.PlaneGeometry(widthMeters, heightMeters, 1, 1);
-
-  const mat = new THREE.ShaderMaterial({
-    vertexShader,
-    fragmentShader,
-    uniforms: {
-      uMask: { value: maskTex },
-      uTime: { value: 0.0 },
-    },
-    transparent: true,
-    depthWrite: false,
-    side: THREE.DoubleSide,
-    blending: THREE.NormalBlending,
-    extensions: { derivatives: true },
-  });
-
-  bubbleMesh = new THREE.Mesh(geo, mat);
-  // Flutua 1.5cm acima da superfície da chapa
-  bubbleMesh.position.set(0, 0, 0.015);
-
-  const anchor = mindarThree.addAnchor(0);
-  anchor.group.add(bubbleMesh);
-
-  anchor.onTargetFound = () => {
-    const s = document.getElementById('status');
-    s.textContent = 'escultura detectada ✦';
-    s.classList.remove('hidden');
-    setTimeout(() => s.classList.add('hidden'), 2500);
-  };
-  anchor.onTargetLost = () => {
-    const s = document.getElementById('status');
-    s.textContent = 'procurando escultura...';
-    s.classList.remove('hidden');
-  };
-
-  await mindarThree.start();
-
-  renderer.setAnimationLoop(() => {
-    if (bubbleMesh) bubbleMesh.material.uniforms.uTime.value = clock.getElapsedTime();
-    renderer.render(scene, camera);
-  });
-}
+}());
 </script>
 
 </body>

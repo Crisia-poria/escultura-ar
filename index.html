@@ -210,14 +210,18 @@ renderer.setAnimationLoop((ts,frame)=>{
   mat.uniforms.uTime.value=clock.getElapsedTime();
 
   if (frame&&xrRef) {
-    // Posiciona bolha na direção do olhar do usuário (funciona para paredes)
-    if (!placed) {
-      const vp=frame.getViewerPose(xrRef);
-      if (vp) {
-        // Vetor forward da câmera, 1.2m à frente
-        const _fwd=new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
-        mesh.position.copy(camera.position).addScaledVector(_fwd,1.2);
-        placed=true;
+    // Hit-test: segue superfície horizontal (chão) em tempo real
+    if (hitSrc) {
+      const hits=frame.getHitTestResults(hitSrc);
+      if (hits.length>0) {
+        const p=hits[0].getPose(xrRef);
+        if (p) {
+          mesh.position.set(
+            p.transform.position.x,
+            p.transform.position.y+0.004,
+            p.transform.position.z
+          );
+        }
       }
     }
 

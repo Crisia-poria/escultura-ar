@@ -27,7 +27,7 @@
     #err {
       position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%);
       color: rgba(255,255,255,0.3); font: 11px/1 sans-serif; letter-spacing: 2px;
-      display: none;
+      display: none; text-align: center; max-width: 80vw;
     }
   </style>
 </head>
@@ -71,12 +71,10 @@ function buildGeo() {
     for (let j=0;j<=SLICES;j++) {
       const a=2*Math.PI*j/SLICES, ca=Math.cos(a), sa=Math.sin(a);
       const vx=rx*ca, vz=rz*sa;
-      // Rotação -90° em X baked: (x,y,z) → (x,z,-y)  [deitado no plano XZ]
-      pos.push(vx, vz, -y);
+      pos.push(vx, vz, -y); // rotação -90°X baked
       const [tx1,ty1,tz1]=[-rx*sa,0,rz*ca],[tx2,ty2,tz2]=[drx*ca,1,drz*sa];
       let nx=ty1*tz2-tz1*ty2, ny=tz1*tx2-tx1*tz2, nz=tx1*ty2-ty1*tx2;
       const nl=Math.sqrt(nx*nx+ny*ny+nz*nz)||1;
-      // mesma rotação nas normais
       nor.push(nx/nl, nz/nl, -ny/nl);
       uv.push(j/SLICES,t);
     }
@@ -97,17 +95,20 @@ const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 renderer.setSize(innerWidth,innerHeight);
 renderer.xr.enabled=true;
-// canvas visível apenas durante AR
 renderer.domElement.style.display='none';
 document.body.insertBefore(renderer.domElement,document.getElementById('tap'));
 
 const scene=new THREE.Scene();
 const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,0.01,20);
 
-// ── Shader iridescente ───────────────────────────────────────
+// ── Shader iridescente + reveal ──────────────────────────────
 const mat=new THREE.ShaderMaterial({
   transparent:true, side:THREE.DoubleSide, depthWrite:false,
-  uniforms:{uTime:{value:0},uTouch:{value:-99},uHand:{value:-1},uHue:{value:0}},
+  uniforms:{
+    uTime:{value:0}, uTouch:{value:-99},
+    uHand:{value:-1}, uHue:{value:0},
+    uReveal:{value:0}  // 0=invisível → 1=completo
+  },
   vertexShader:`
     varying vec3 vN,vV; varying vec2 vUv;
     void main(){
@@ -116,9 +117,10 @@ const mat=new THREE.ShaderMaterial({
       vV=normalize(-mv.xyz); gl_Position=projectionMatrix*mv;
     }`,
   fragmentShader:`
-    uniform float uTime,uTouch,uHand,uHue;
+    uniform float uTime,uTouch,uHand,uHue,uReveal;
     varying vec3 vN,vV; varying vec2 vUv;
     void main(){
+      if(uReveal<=0.) discard;
       float f=pow(1.-abs(dot(normalize(vN),normalize(vV))),1.3);
 
       float dt=uTime-uTouch, alive=step(dt,2.5);
@@ -135,7 +137,7 @@ const mat=new THREE.ShaderMaterial({
       float ig=.5+.5*sin(uTime*.7+vUv.y*4.);
       vec3 col=c*(.15+f*.55)+c*pulse*f*.5+c*decay*.6+c*hs*.5
               +vec3(.3,.6,1.)*ig*(1.-abs(dot(normalize(vN),normalize(vV))))*.12;
-      float a=clamp(.04+f*.6+pulse*f*.25+decay*.3+hs*.25,0.,.93);
+      float a=clamp((.04+f*.6+pulse*f*.25+decay*.3+hs*.25)*uReveal,0.,.93);
       gl_FragColor=vec4(col,a);
     }`
 });
@@ -143,14 +145,26 @@ const mat=new THREE.ShaderMaterial({
 const mesh=new THREE.Mesh(buildGeo(),mat);
 scene.add(mesh);
 
+// ── Anel de varredura ────────────────────────────────────────
+const ringGeo=new THREE.RingGeometry(0.18,0.22,64);
+const ringMat=new THREE.MeshBasicMaterial({
+  color:0x88ccff, transparent:true, opacity:0, side:THREE.DoubleSide
+});
+const ring=new THREE.Mesh(ringGeo,ringMat);
+ring.rotation.x=-Math.PI/2;
+scene.add(ring);
+
+// ── Estado de varredura ───────────────────────────────────────
+let scanning=false, locked=false, scanAccum=0;
+const SCAN_NEEDED=2.0; // segundos de superfície estável para travar
+
 // ── Raycaster (toque na bolha) ───────────────────────────────
 const rc=new THREE.Raycaster(), pt=new THREE.Vector2();
 const clock=new THREE.Clock();
-let hue=0;
+let hue=0, lastT=0;
 
-// Toque na bolha (durante AR)
 window.addEventListener('click', e=>{
-  if (!xrSess) return;
+  if (!xrSess||!locked) return;
   const x=e.clientX, y=e.clientY;
   pt.x=(x/innerWidth)*2-1; pt.y=-(y/innerHeight)*2+1;
   rc.setFromCamera(pt,camera);
@@ -161,7 +175,7 @@ window.addEventListener('click', e=>{
 });
 
 // ── AR ───────────────────────────────────────────────────────
-let xrSess=null, xrRef=null, hitSrc=null, placed=false;
+let xrSess=null, xrRef=null, hitSrc=null;
 const tapEl=document.getElementById('tap');
 const errEl=document.getElementById('err');
 
@@ -170,75 +184,102 @@ function showErr(msg){ errEl.innerHTML=msg; errEl.style.display='block'; }
 function setupSession(session) {
   xrSess=session;
   renderer.xr.setReferenceSpaceType('local-floor');
-  renderer.xr.setSession(session).then(()=>
-    session.requestReferenceSpace('local-floor')
-  ).then(ref=>{
-    xrRef=ref;
-    return session.requestReferenceSpace('viewer')
-      .then(vs=>session.requestHitTestSource({space:vs}))
-      .catch(()=>null);
-  }).then(hs=>{
-    hitSrc=hs; placed=false;
-    mesh.position.set(0,0.004,-0.85);
-    tapEl.classList.add('hidden');
-    renderer.domElement.style.display='block';
-  }).catch(e=>showErr(e.message));
+  renderer.xr.setSession(session)
+    .then(()=>session.requestReferenceSpace('local-floor'))
+    .then(ref=>{
+      xrRef=ref;
+      return session.requestReferenceSpace('viewer')
+        .then(vs=>session.requestHitTestSource({space:vs}))
+        .catch(()=>null);
+    }).then(hs=>{
+      hitSrc=hs;
+      scanning=true; locked=false; scanAccum=0;
+      mat.uniforms.uReveal.value=0;
+      lastT=clock.getElapsedTime();
+      tapEl.classList.add('hidden');
+      renderer.domElement.style.display='block';
+    }).catch(e=>showErr(e.message));
 
   session.addEventListener('end',()=>{
-    xrSess=null; xrRef=null; hitSrc=null; placed=false;
+    xrSess=null; xrRef=null; hitSrc=null;
+    scanning=false; locked=false; scanAccum=0;
     mat.uniforms.uHand.value=-1;
+    mat.uniforms.uReveal.value=0;
+    ringMat.opacity=0;
     renderer.domElement.style.display='none';
     tapEl.classList.remove('hidden');
   });
 }
 
-// Botão de AR — click direto sem async intermediário
-tapEl.addEventListener('click', ()=>{
+tapEl.addEventListener('click',()=>{
   if (xrSess) return;
   if (!navigator.xr){ showErr('WebXR indisponível — use Quest Browser'); return; }
-  // requestSession como PRIMEIRA chamada no handler de click
   navigator.xr.requestSession('immersive-ar',{
     requiredFeatures:['local'],
     optionalFeatures:['local-floor','hit-test','hand-tracking']
-  }).then(setupSession).catch(e=>{ alert('Erro: '+( e.message||String(e))); showErr(e.message||String(e)); });
+  }).then(setupSession).catch(e=>{ alert('Erro: '+(e.message||String(e))); });
 });
 
 // ── Loop ─────────────────────────────────────────────────────
 const _hp=new THREE.Vector3();
 
 renderer.setAnimationLoop((ts,frame)=>{
-  mat.uniforms.uTime.value=clock.getElapsedTime();
+  const t=clock.getElapsedTime();
+  const dt=t-lastT; lastT=t;
+  mat.uniforms.uTime.value=t;
 
   if (frame&&xrRef) {
-    // Hit-test: segue superfície horizontal (chão) em tempo real
-    if (hitSrc) {
+
+    // ── Fase de varredura ──
+    if (scanning&&hitSrc) {
       const hits=frame.getHitTestResults(hitSrc);
       if (hits.length>0) {
         const p=hits[0].getPose(xrRef);
         if (p) {
-          mesh.position.set(
-            p.transform.position.x,
-            p.transform.position.y+0.004,
-            p.transform.position.z
-          );
+          // anel segue a superfície detectada
+          ring.position.set(p.transform.position.x, p.transform.position.y+0.003, p.transform.position.z);
+          scanAccum+=dt;
+
+          // pulso do anel aumenta conforme aproxima do lock
+          const progress=Math.min(scanAccum/SCAN_NEEDED,1);
+          const pulse=0.6+0.4*Math.sin(t*6);
+          ringMat.opacity=0.3+progress*0.5*pulse;
+          ring.scale.setScalar(1+0.08*Math.sin(t*5));
+
+          if (scanAccum>=SCAN_NEEDED) {
+            // LOCK: bolha aparece sobre a posição encontrada
+            mesh.position.set(p.transform.position.x, p.transform.position.y+0.004, p.transform.position.z);
+            scanning=false; locked=true;
+            hitSrc.cancel(); hitSrc=null;
+          }
         }
+      } else {
+        // superfície perdida: reset acumulador
+        scanAccum=Math.max(0,scanAccum-dt*2);
+        ringMat.opacity=Math.max(0,ringMat.opacity-dt);
       }
     }
 
-    // Hand tracking (Quest 3) — distância horizontal XZ
+    // ── Fade-in da bolha após lock ──
+    if (locked) {
+      // ring desaparece
+      ringMat.opacity=Math.max(0,ringMat.opacity-dt*2);
+      // bolha aparece
+      mat.uniforms.uReveal.value=Math.min(1,mat.uniforms.uReveal.value+dt*0.6);
+    }
+
+    // ── Hand tracking ──
     const sess=renderer.xr.getSession();
     let minD=-1;
     for (const src of sess.inputSources) {
       if (!src.hand) continue;
-      // verifica múltiplas juntas da mão
       for (const joint of ['index-finger-tip','middle-finger-tip','wrist']) {
         const j=src.hand.get(joint);
         if (!j) continue;
         const pose=frame.getJointPose(j,xrRef);
         if (!pose) continue;
-        const p=pose.transform.position;
-        // distância apenas no plano XZ (ignora altura da mão)
-        const dx=p.x-mesh.position.x, dz=p.z-mesh.position.z;
+        const pp=pose.transform.position;
+        const dx=pp.x-mesh.position.x, dz=pp.z-mesh.position.z;
         const d=Math.sqrt(dx*dx+dz*dz);
         if (minD<0||d<minD) minD=d;
       }

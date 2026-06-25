@@ -49,8 +49,10 @@
 
 <div id="status" class="hidden"></div>
 
-<!-- MindAR bundle — includes Three.js internally -->
-<script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"></script>
+<!-- Three.js UMD (must load before MindAR) -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<!-- MindAR image tracking (uses THREE global set above) -->
+<script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.2/dist/mindar-image-three.prod.js"></script>
 
 <script>
 (function () {

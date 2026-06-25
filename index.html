@@ -3,69 +3,45 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-  <title>Escultura AR — Crisia</title>
+  <title>Bolha digital sob metal</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; background: #06060e; overflow: hidden; }
-    canvas { display: block; width: 100% !important; height: 100% !important; }
-    #ui {
-      position: fixed; bottom: 0; left: 0; right: 0;
-      display: flex; flex-direction: column; align-items: center; padding-bottom: 44px; gap: 12px;
-      pointer-events: none;
+    html, body { width: 100%; height: 100%; background: #000; overflow: hidden; touch-action: none; }
+    canvas { position: fixed; inset: 0; width: 100% !important; height: 100% !important; }
+    #tap {
+      position: fixed; inset: 0;
+      display: flex; align-items: center; justify-content: center;
     }
-    #label { color: rgba(140,200,255,0.45); font-size: 11px; letter-spacing: 3px; font-family: sans-serif; }
-    .ar-btn {
-      pointer-events: all;
-      padding: 14px 52px;
-      border: 1px solid rgba(140,200,255,0.55);
-      background: rgba(0,0,10,0.75);
-      color: rgba(140,200,255,0.9);
-      font-size: 13px; letter-spacing: 3px; font-family: sans-serif;
-      cursor: pointer; border-radius: 2px; -webkit-tap-highlight-color: transparent;
-      text-decoration: none; display: inline-block; text-align: center;
+    #tap::after {
+      content: '';
+      width: 48px; height: 48px;
+      border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 50%;
+      animation: breathe 3s ease-in-out infinite;
     }
-    .ar-btn:active { background: rgba(80,150,255,0.2); }
-    .ar-btn:disabled { opacity: 0.35; cursor: default; }
-    #msg {
-      position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
-      color: rgba(140,200,255,0.45); font-size: 11px; letter-spacing: 2px;
-      font-family: sans-serif; text-align: center; white-space: nowrap;
+    @keyframes breathe {
+      0%,100% { opacity: 0.18; transform: scale(1); }
+      50%      { opacity: 0.45; transform: scale(1.15); }
     }
-    /* model-viewer iOS fallback — invisível, só para Quick Look */
-    #mv-ios {
-      position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none;
+    #tap.hidden { display: none; }
+    #err {
+      position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%);
+      color: rgba(255,255,255,0.3); font: 11px/1 sans-serif; letter-spacing: 2px;
+      display: none;
     }
   </style>
-  <!-- model-viewer apenas para iOS Quick Look -->
-  <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js"></script>
 </head>
 <body>
-
-<!-- iOS Quick Look via model-viewer (invisível) -->
-<model-viewer id="mv-ios"
-  src="./bubble.glb"
-  ar ar-modes="quick-look"
-  ar-scale="fixed"
-></model-viewer>
-
-<div id="msg">ESCULTURA AR — CRISIA</div>
-<div id="ui">
-  <span id="label">toque na bolha para interagir</span>
-  <button id="ar-btn" class="ar-btn">VER EM AR ✦</button>
-</div>
+<div id="tap"></div>
+<div id="err"></div>
 
 <script type="importmap">
 {"imports":{"three":"https://unpkg.com/three@0.150.0/build/three.module.js"}}
 </script>
-
 <script type="module">
 import * as THREE from 'three';
 
-// ── Detecção de plataforma ────────────────────────────────────
-const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-const hasWebXR = !!navigator.xr;
-
-// ── Profile da escultura ──────────────────────────────────────
+// ── Perfil orgânico da escultura ─────────────────────────────
 const PROFILE = [
   [0.00,0.018,0.013],[0.03,0.060,0.045],[0.07,0.105,0.078],
   [0.13,0.128,0.095],[0.19,0.118,0.088],[0.25,0.082,0.060],
@@ -78,30 +54,34 @@ const PROFILE = [
 ];
 const HEIGHT=0.55, SLICES=56, STACKS=88;
 
-function interpProfile(t) {
+function interp(t) {
   for (let i=0;i<PROFILE.length-1;i++) {
-    const [t0,rx0,rz0]=PROFILE[i],[t1,rx1,rz1]=PROFILE[i+1];
-    if (t>=t0&&t<=t1) { const f=(t1>t0)?(t-t0)/(t1-t0):0; return [rx0+f*(rx1-rx0),rz0+f*(rz1-rz0)]; }
+    const [t0,a,b]=PROFILE[i],[t1,c,d]=PROFILE[i+1];
+    if (t>=t0&&t<=t1){const f=(t1>t0)?(t-t0)/(t1-t0):0;return[a+f*(c-a),b+f*(d-b)];}
   }
-  return [PROFILE.at(-1)[1],PROFILE.at(-1)[2]];
+  return PROFILE.at(-1).slice(1);
 }
 
-function buildGeometry() {
+function buildGeo() {
   const pos=[],nor=[],uv=[],idx=[];
   for (let i=0;i<=STACKS;i++) {
-    const t=i/STACKS,y=(t-0.5)*HEIGHT,[rx,rz]=interpProfile(t);
-    const eps=0.005,[rxU,rzU]=interpProfile(Math.min(t+eps,1)),[rxD,rzD]=interpProfile(Math.max(t-eps,0));
-    const drx=(rxU-rxD)/(2*eps*HEIGHT),drz=(rzU-rzD)/(2*eps*HEIGHT);
+    const t=i/STACKS, y=(t-0.5)*HEIGHT, [rx,rz]=interp(t);
+    const e=0.005,[rxU,rzU]=interp(Math.min(t+e,1)),[rxD,rzD]=interp(Math.max(t-e,0));
+    const drx=(rxU-rxD)/(2*e*HEIGHT), drz=(rzU-rzD)/(2*e*HEIGHT);
     for (let j=0;j<=SLICES;j++) {
-      const a=2*Math.PI*j/SLICES,ca=Math.cos(a),sa=Math.sin(a);
-      pos.push(rx*ca,y,rz*sa);
+      const a=2*Math.PI*j/SLICES, ca=Math.cos(a), sa=Math.sin(a);
+      const vx=rx*ca, vz=rz*sa;
+      // Rotação -90° em X baked: (x,y,z) → (x,z,-y)  [deitado no plano XZ]
+      pos.push(vx, vz, -y);
       const [tx1,ty1,tz1]=[-rx*sa,0,rz*ca],[tx2,ty2,tz2]=[drx*ca,1,drz*sa];
-      let nx=ty1*tz2-tz1*ty2,ny=tz1*tx2-tx1*tz2,nz=tx1*ty2-ty1*tx2;
+      let nx=ty1*tz2-tz1*ty2, ny=tz1*tx2-tx1*tz2, nz=tx1*ty2-ty1*tx2;
       const nl=Math.sqrt(nx*nx+ny*ny+nz*nz)||1;
-      nor.push(nx/nl,ny/nl,nz/nl); uv.push(j/SLICES,t);
+      // mesma rotação nas normais
+      nor.push(nx/nl, nz/nl, -ny/nl);
+      uv.push(j/SLICES,t);
     }
   }
-  for (let i=0;i<STACKS;i++) for (let j=0;j<SLICES;j++) {
+  for (let i=0;i<STACKS;i++) for(let j=0;j<SLICES;j++){
     const a=i*(SLICES+1)+j,b=a+SLICES+1;
     idx.push(a,b,a+1,b,b+1,a+1);
   }
@@ -112,176 +92,162 @@ function buildGeometry() {
   g.setIndex(idx); return g;
 }
 
-// ── Renderer ──────────────────────────────────────────────────
-const renderer = new THREE.WebGLRenderer({antialias:true,alpha:true});
+// ── Renderer ─────────────────────────────────────────────────
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 renderer.setSize(innerWidth,innerHeight);
-renderer.xr.enabled = true;
-document.body.insertBefore(renderer.domElement, document.getElementById('msg'));
+renderer.xr.enabled=true;
+// canvas visível apenas durante AR
+renderer.domElement.style.display='none';
+document.body.insertBefore(renderer.domElement,document.getElementById('tap'));
 
-const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(70,innerWidth/innerHeight,0.01,20);
-camera.position.set(0,0.5,1.5);
-scene.add(new THREE.AmbientLight(0xffffff,0.15));
+const scene=new THREE.Scene();
+const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,0.01,20);
 
-// ── Shader iridescente + interativo ──────────────────────────
-const mat = new THREE.ShaderMaterial({
+// ── Shader iridescente ───────────────────────────────────────
+const mat=new THREE.ShaderMaterial({
   transparent:true, side:THREE.DoubleSide, depthWrite:false,
-  uniforms: {
-    uTime:      {value:0},
-    uTouchTime: {value:-99},
-    uHandDist:  {value:-1},
-    uHue:       {value:0},
-  },
+  uniforms:{uTime:{value:0},uTouch:{value:-99},uHand:{value:-1},uHue:{value:0}},
   vertexShader:`
-    varying vec3 vNormal; varying vec3 vViewDir; varying vec2 vUv;
+    varying vec3 vN,vV; varying vec2 vUv;
     void main(){
-      vUv=uv; vNormal=normalize(normalMatrix*normal);
-      vec4 mvPos=modelViewMatrix*vec4(position,1.0);
-      vViewDir=normalize(-mvPos.xyz);
-      gl_Position=projectionMatrix*mvPos;
-    }
-  `,
+      vUv=uv; vN=normalize(normalMatrix*normal);
+      vec4 mv=modelViewMatrix*vec4(position,1.);
+      vV=normalize(-mv.xyz); gl_Position=projectionMatrix*mv;
+    }`,
   fragmentShader:`
-    uniform float uTime,uTouchTime,uHandDist,uHue;
-    varying vec3 vNormal,vViewDir; varying vec2 vUv;
+    uniform float uTime,uTouch,uHand,uHue;
+    varying vec3 vN,vV; varying vec2 vUv;
     void main(){
-      vec3 N=normalize(vNormal),V=normalize(vViewDir);
-      float NdotV=abs(dot(N,V));
-      float fresnel=pow(1.0-NdotV,1.3);
+      float f=pow(1.-abs(dot(normalize(vN),normalize(vV))),1.3);
 
-      float sinceTouch=uTime-uTouchTime;
-      float touchAlive=step(sinceTouch,2.5);
-      float touchDecay=max(0.0,1.0-sinceTouch*0.5);
-      float touchWave=sin(sinceTouch*14.0-vUv.y*10.0)*touchDecay*touchAlive*0.6;
-      float touchBoost=touchDecay*touchAlive;
+      float dt=uTime-uTouch, alive=step(dt,2.5);
+      float decay=max(0.,1.-dt*.5)*alive;
+      float tw=sin(dt*14.-vUv.y*10.)*decay*.65;
 
-      float handAlive=step(0.0,uHandDist)*step(uHandDist,0.18);
-      float handStrength=max(0.0,1.0-uHandDist*6.0)*handAlive;
-      float handWave=sin(uTime*18.0-vUv.y*12.0)*handStrength*0.7;
+      float hs=max(0.,1.-uHand*6.)*step(0.,uHand)*step(uHand,.18);
+      float hw=sin(uTime*18.-vUv.y*12.)*hs*.7;
 
-      float ripple=touchWave+handWave;
-      float phase=fresnel*6.5+vUv.y*3.0-uTime*0.55+ripple*2.5+touchBoost*3.0+uHue;
-      vec3 iri=vec3(
-        0.5+0.5*cos(phase),
-        0.5+0.5*cos(phase+2.094),
-        0.5+0.5*cos(phase+4.189)
-      );
+      float ph=f*6.5+vUv.y*3.-uTime*.55+(tw+hw)*2.5+decay*3.+uHue;
+      vec3 c=vec3(.5+.5*cos(ph),.5+.5*cos(ph+2.094),.5+.5*cos(ph+4.189));
 
-      float pulse=0.5+0.5*sin(uTime*1.9);
-      float innerGlow=0.5+0.5*sin(uTime*0.7+vUv.y*4.0);
-
-      vec3 col=iri*(0.15+fresnel*0.55)
-              +iri*pulse*fresnel*0.5
-              +iri*touchBoost*0.6
-              +iri*handStrength*0.5
-              +vec3(0.3,0.6,1.0)*innerGlow*(1.0-NdotV)*0.12;
-
-      float alpha=0.04+fresnel*0.6+pulse*fresnel*0.25+touchBoost*0.3+handStrength*0.25;
-      gl_FragColor=vec4(col,clamp(alpha,0.0,0.92));
-    }
-  `
+      float pulse=.5+.5*sin(uTime*1.9);
+      float ig=.5+.5*sin(uTime*.7+vUv.y*4.);
+      vec3 col=c*(.15+f*.55)+c*pulse*f*.5+c*decay*.6+c*hs*.5
+              +vec3(.3,.6,1.)*ig*(1.-abs(dot(normalize(vN),normalize(vV))))*.12;
+      float a=clamp(.04+f*.6+pulse*f*.25+decay*.3+hs*.25,0.,.93);
+      gl_FragColor=vec4(col,a);
+    }`
 });
 
-const mesh=new THREE.Mesh(buildGeometry(),mat);
-mesh.position.set(0,0.004,-0.85);
+const mesh=new THREE.Mesh(buildGeo(),mat);
 scene.add(mesh);
 
-// ── Raycaster ─────────────────────────────────────────────────
-const raycaster=new THREE.Raycaster(), pointer=new THREE.Vector2();
+// ── Raycaster (toque na bolha) ───────────────────────────────
+const rc=new THREE.Raycaster(), pt=new THREE.Vector2();
 const clock=new THREE.Clock();
-let hueStep=0;
+let hue=0;
 
-function onPointerDown(e) {
-  if (e.target.closest('#ui')||e.target.closest('#mv-ios')) return;
-  const x=e.clientX??e.touches?.[0]?.clientX, y=e.clientY??e.touches?.[0]?.clientY;
-  if (x==null) return;
-  pointer.x=(x/innerWidth)*2-1; pointer.y=-(y/innerHeight)*2+1;
-  raycaster.setFromCamera(pointer,camera);
-  const hits=raycaster.intersectObject(mesh,false);
-  if (hits.length>0) {
-    mat.uniforms.uTouchTime.value=clock.getElapsedTime();
-    hueStep+=Math.PI*0.72;
-    mat.uniforms.uHue.value=hueStep;
+function onTap(e) {
+  if (e.target===document.getElementById('tap')||e.target===document.body){
+    startAR(); return;
+  }
+  const x=e.clientX??e.touches?.[0]?.clientX??0;
+  const y=e.clientY??e.touches?.[0]?.clientY??0;
+  pt.x=(x/innerWidth)*2-1; pt.y=-(y/innerHeight)*2+1;
+  rc.setFromCamera(pt,camera);
+  if (rc.intersectObject(mesh,false).length){
+    mat.uniforms.uTouch.value=clock.getElapsedTime();
+    hue+=Math.PI*.72; mat.uniforms.uHue.value=hue;
   }
 }
-window.addEventListener('pointerdown',onPointerDown);
-window.addEventListener('touchstart',onPointerDown,{passive:true});
+window.addEventListener('pointerdown',onTap);
 
-// ── Botão AR ─────────────────────────────────────────────────
-const btn=document.getElementById('ar-btn');
-let xrSession=null, xrRefSpace=null;
+// ── AR ───────────────────────────────────────────────────────
+let xrSess=null, xrRef=null, hitSrc=null, placed=false;
+const tapEl=document.getElementById('tap');
+const errEl=document.getElementById('err');
 
-if (isIOS) {
-  // iOS: dispara Quick Look via model-viewer
-  document.getElementById('label').textContent = 'iPhone: modo Quick Look';
-  btn.addEventListener('click', () => {
-    const mv = document.getElementById('mv-ios');
-    // Aciona o botão AR interno do model-viewer
-    const arBtn = mv.shadowRoot?.querySelector('button[slot="ar-button"]')
-                ?? mv.querySelector('[slot="ar-button"]');
-    if (arBtn) { arBtn.click(); return; }
-    // Fallback: ativa AR diretamente
-    mv.activateAR();
-  });
-} else if (!hasWebXR) {
-  btn.textContent = 'AR indisponível';
-  btn.disabled = true;
-  document.getElementById('label').textContent = 'navegador sem suporte WebXR';
-} else {
-  // WebXR (Quest 3, Android Chrome)
-  navigator.xr.isSessionSupported('immersive-ar').then(ok => {
-    if (!ok) { btn.textContent='AR indisponível'; btn.disabled=true; }
-  });
+async function startAR() {
+  if (xrSess) return;
+  if (!navigator.xr){
+    errEl.textContent='WebXR não disponível neste navegador'; errEl.style.display='block'; return;
+  }
+  const ok=await navigator.xr.isSessionSupported('immersive-ar').catch(()=>false);
+  if (!ok){
+    errEl.textContent='AR não suportado neste dispositivo'; errEl.style.display='block'; return;
+  }
+  try {
+    xrSess=await navigator.xr.requestSession('immersive-ar',{
+      requiredFeatures:['local-floor'],
+      optionalFeatures:['hit-test','dom-overlay','hand-tracking'],
+      domOverlay:{root:document.body}
+    });
+    renderer.xr.setReferenceSpaceType('local-floor');
+    await renderer.xr.setSession(xrSess);
+    xrRef=await xrSess.requestReferenceSpace('local-floor');
 
-  btn.addEventListener('click', async () => {
-    if (xrSession) return;
+    // Hit-test: detecta superfície automaticamente
     try {
-      xrSession = await navigator.xr.requestSession('immersive-ar', {
-        requiredFeatures: ['local-floor'],
-        optionalFeatures: ['dom-overlay','hand-tracking'],
-        domOverlay: {root: document.body}
-      });
-      renderer.xr.setReferenceSpaceType('local-floor');
-      await renderer.xr.setSession(xrSession);
-      xrRefSpace = await xrSession.requestReferenceSpace('local-floor');
+      const viewerSpace=await xrSess.requestReferenceSpace('viewer');
+      hitSrc=await xrSess.requestHitTestSource({space:viewerSpace});
+    } catch(_){}
 
-      mesh.position.set(0,0.004,-0.85);
+    // Posição inicial antes do hit-test confirmar
+    mesh.position.set(0,0.004,-0.85);
+    placed=false;
 
-      xrSession.addEventListener('end',()=>{
-        xrSession=null; xrRefSpace=null;
-        mat.uniforms.uHandDist.value=-1;
-        document.getElementById('ui').style.display='flex';
-        document.getElementById('msg').style.display='block';
-      });
-      document.getElementById('ui').style.display='none';
-      document.getElementById('msg').style.display='none';
-    } catch(e) {
-      alert('Erro AR: '+(e.message||e));
-    }
-  });
+    tapEl.classList.add('hidden');
+    renderer.domElement.style.display='block';
+
+    xrSess.addEventListener('end',()=>{
+      xrSess=null; xrRef=null; hitSrc=null; placed=false;
+      mat.uniforms.uHand.value=-1;
+      renderer.domElement.style.display='none';
+      tapEl.classList.remove('hidden');
+    });
+  } catch(e){
+    errEl.textContent=e.message||'erro desconhecido'; errEl.style.display='block';
+  }
 }
 
-// ── Loop ──────────────────────────────────────────────────────
+// ── Loop ─────────────────────────────────────────────────────
 const _hp=new THREE.Vector3();
+
 renderer.setAnimationLoop((ts,frame)=>{
   mat.uniforms.uTime.value=clock.getElapsedTime();
-  if (frame&&xrRefSpace) {
+
+  if (frame&&xrRef) {
+    // Auto-posiciona via hit-test na superfície detectada
+    if (hitSrc&&!placed) {
+      const hits=frame.getHitTestResults(hitSrc);
+      if (hits.length>0) {
+        const p=hits[0].getPose(xrRef);
+        if (p) {
+          mesh.position.set(p.transform.position.x, p.transform.position.y+0.004, p.transform.position.z);
+          placed=true;
+          hitSrc.cancel(); hitSrc=null;
+        }
+      }
+    }
+
+    // Hand tracking (Quest 3)
     const sess=renderer.xr.getSession();
     let minD=-1;
     for (const src of sess.inputSources) {
       if (!src.hand) continue;
       const tip=src.hand.get('index-finger-tip');
       if (!tip) continue;
-      const pose=frame.getJointPose(tip,xrRefSpace);
+      const pose=frame.getJointPose(tip,xrRef);
       if (!pose) continue;
       const p=pose.transform.position;
       _hp.set(p.x,p.y,p.z);
       const d=_hp.distanceTo(mesh.position);
       if (minD<0||d<minD) minD=d;
     }
-    mat.uniforms.uHandDist.value=minD;
+    mat.uniforms.uHand.value=minD;
   }
+
   renderer.render(scene,camera);
 });
 

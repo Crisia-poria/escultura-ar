@@ -184,7 +184,6 @@ const mat = new THREE.ShaderMaterial({
 });
 
 const mesh=new THREE.Mesh(buildGeometry(),mat);
-mesh.rotation.x=-Math.PI/2;
 mesh.position.set(0,0.004,-0.85);
 scene.add(mesh);
 
@@ -247,7 +246,6 @@ if (isIOS) {
       await renderer.xr.setSession(xrSession);
       xrRefSpace = await xrSession.requestReferenceSpace('local-floor');
 
-      mesh.rotation.x=0;
       mesh.position.set(0,0.004,-0.85);
 
       xrSession.addEventListener('end',()=>{

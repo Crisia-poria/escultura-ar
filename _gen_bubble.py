@@ -74,8 +74,9 @@ for i in range(STACKS + 1):
         else:
             nx, ny, nz = ca, 0.0, sa
 
-        pos += [x, y, z]
-        nor += [nx, ny, nz]
+        # Rotate -90° on X: new=(x, z, -y) → lies flat on XZ plane
+        pos += [x, z, -y]
+        nor += [nx, nz, -ny]
         uvs += [j / SLICES, t]
 
 for i in range(STACKS):

@@ -210,17 +210,28 @@ window.addEventListener('load',()=>{
   }
 });
 
+function status(msg){errEl.textContent=msg;errEl.style.display='block';}
+
 tapEl.addEventListener('click',async()=>{
-  errEl.style.display='none';
-
-  // Verifica disponibilidade
-  if(!window.MINDAR||!window.MINDAR.IMAGE){
-    errEl.textContent='MindAR não disponível. Recarregue a página.';
-    errEl.style.display='block';return;
-  }
-
   tapEl.classList.add('hidden');
-  errEl.textContent='Iniciando câmera…';errEl.style.display='block';
+
+  // Passo 1: MindAR carregado?
+  status('1/4 — verificando MindAR…');
+  if(!window.MINDAR||!window.MINDAR.IMAGE){
+    status('ERRO: script MindAR não carregou. Verifique conexão e recarregue.');
+    tapEl.classList.remove('hidden');return;
+  }
+  status('2/4 — carregando targets.mind…');
+
+  // Passo 2: arquivo targets.mind acessível?
+  try{
+    const r=await fetch('targets.mind');
+    if(!r.ok) throw new Error('HTTP '+r.status);
+  }catch(e){
+    status('ERRO targets.mind: '+e.message);
+    tapEl.classList.remove('hidden');return;
+  }
+  status('3/4 — pedindo câmera…');
 
   if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();
 
@@ -235,7 +246,7 @@ tapEl.addEventListener('click',async()=>{
       uiScanning:'yes',
     });
   }catch(e){
-    errEl.textContent='Erro MindAR: '+(e.message||e);errEl.style.display='block';
+    status('ERRO MindAR init: '+(e.message||e));
     tapEl.classList.remove('hidden');return;
   }
 

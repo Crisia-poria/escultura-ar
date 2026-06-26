@@ -125,15 +125,53 @@ const mat=new THREE.ShaderMaterial({
   depthWrite:false,
   uniforms:{uTime:{value:0},uTouch:{value:-99},uHue:{value:0},uReveal:{value:0},uHand:{value:-1}},
   vertexShader:`
-    varying vec3 vN,vV;varying vec2 vUv;
+    uniform float uTime,uTouch,uReveal,uHand;
+    varying vec3 vN,vV;varying vec2 vUv;varying float vDisp;
+
+    // Noise simples (hash + smooth)
+    float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5);}
+    float noise(vec2 p){
+      vec2 i=floor(p),f=fract(p);
+      f=f*f*(3.-2.*f);
+      float a=hash(i),b=hash(i+vec2(1,0)),c=hash(i+vec2(0,1)),d=hash(i+vec2(1,1));
+      return mix(mix(a,b,f.x),mix(c,d,f.x),f.y);
+    }
+
     void main(){
-      vUv=uv;vN=normalize(normalMatrix*normal);
-      vec4 mv=modelViewMatrix*vec4(position,1.);
-      vV=normalize(-mv.xyz);gl_Position=projectionMatrix*mv;
+      vUv=uv;
+
+      float dt=uTime-uTouch;
+      float alive=step(dt,5.);
+      // Onda de toque: propaga devagar pela superfície (velocidade ~0.4 uv/s)
+      float waveFront=dt*.38;
+      float distFromFront=abs(vUv.y-waveFront);
+      float touchWave=exp(-distFromFront*distFromFront*18.)*alive*
+                      sin(dt*3.5-vUv.y*9.)*max(0.,1.-dt*.22);
+
+      // Respiração lenta permanente
+      float breathe=sin(uTime*.55+vUv.y*2.2)*0.008
+                   +sin(uTime*.31+vUv.x*3.1)*0.005;
+
+      // Tensão de mão: superfície atrai suavemente
+      float hs=max(0.,1.-uHand*2.5)*step(0.,uHand)*step(uHand,.4);
+      float handPull=hs*0.018*sin(uTime*2.8+vUv.y*5.);
+
+      // Noise líquido lento sempre presente
+      float n=noise(vUv*3.+vec2(uTime*.18,uTime*.11));
+      float liqNoise=(n-.5)*0.012;
+
+      float disp=(touchWave*0.032+breathe+handPull+liqNoise)*uReveal;
+      vDisp=disp;
+
+      vec3 displaced=position+normal*disp;
+      vN=normalize(normalMatrix*normal);
+      vec4 mv=modelViewMatrix*vec4(displaced,1.);
+      vV=normalize(-mv.xyz);
+      gl_Position=projectionMatrix*mv;
     }`,
   fragmentShader:`
     uniform float uTime,uTouch,uHue,uReveal,uHand;
-    varying vec3 vN,vV;varying vec2 vUv;
+    varying vec3 vN,vV;varying vec2 vUv;varying float vDisp;
     void main(){
       if(uReveal<=0.)discard;
       vec3 N=normalize(vN);vec3 V=normalize(vV);
@@ -141,25 +179,26 @@ const mat=new THREE.ShaderMaterial({
       float rim=pow(1.-NdotV,1.2);
       float inner=pow(NdotV,1.5);
 
-      float dt=uTime-uTouch,alive=step(dt,3.);
-      float decay=max(0.,1.-dt*.4)*alive;
-      float tw=sin(dt*14.-vUv.y*10.)*decay*.7;
+      float dt=uTime-uTouch,alive=step(dt,5.);
+      float decay=max(0.,1.-dt*.28)*alive;
       float hs=max(0.,1.-uHand*2.5)*step(0.,uHand)*step(uHand,.4);
-      float hw=sin(uTime*16.-vUv.y*10.)*hs*.9;
 
-      float ph=rim*7.+vUv.y*2.8-uTime*.5+(tw+hw)*2.+decay*3.5+uHue;
+      // Shift de cor na frente da onda de toque
+      float waveFront=dt*.38;
+      float waveGlow=exp(-abs(vUv.y-waveFront)*abs(vUv.y-waveFront)*12.)*decay;
+
+      float ph=rim*7.+vUv.y*2.8-uTime*.45+vDisp*40.+decay*3.+uHue+waveGlow*2.;
       vec3 iri=vec3(.5+.5*cos(ph),.5+.5*cos(ph+2.094),.5+.5*cos(ph+4.189));
 
       float pulse=.5+.5*sin(uTime*1.8);
       float breathe=.5+.5*sin(uTime*.6+vUv.y*3.);
 
-      // Luz interna azul-branca
-      vec3 innerLight=vec3(.55,.82,1.)*inner*(0.5+0.5*breathe)*(1.+decay*1.5+hs*1.2);
-      // Iridescência nas bordas
-      vec3 rimCol=iri*(0.6+rim*.9+pulse*rim*.5+decay*.8+hs*.7);
+      vec3 innerLight=vec3(.55,.82,1.)*inner*(0.5+0.5*breathe)*(1.+decay*1.2+hs*1.2);
+      vec3 waveLight=iri*waveGlow*1.5;
+      vec3 rimCol=iri*(0.6+rim*.9+pulse*rim*.5+decay*.6+hs*.7);
 
-      vec3 col=(innerLight+rimCol)*uReveal;
-      float a=(rim*.8+inner*.5+pulse*rim*.3+decay*.5+hs*.4)*uReveal;
+      vec3 col=(innerLight+rimCol+waveLight)*uReveal;
+      float a=(rim*.8+inner*.5+pulse*rim*.3+decay*.4+hs*.4+waveGlow*.3)*uReveal;
       gl_FragColor=vec4(col,clamp(a,0.,1.));
     }`
 });

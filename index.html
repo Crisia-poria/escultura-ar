@@ -268,12 +268,21 @@ function scanDepth(frame,viewerPose){
 // ── Estado ────────────────────────────────────────────────────
 let xrSess=null,xrRef=null,hitSrc=null;
 let scanning=false,locked=false,scanAccum=0;
+let markerLocked=false; // marcador encontrado pelo menos 1x
 const clock=new THREE.Clock();
 let lastT=0;
 
 const tapEl=document.getElementById('tap');
 const stEl=document.getElementById('st');
 function status(m){stEl.textContent=m;stEl.style.display=m?'block':'none';}
+
+// ── Pré-carrega marcador como ImageBitmap ──────────────────────
+let markerBitmap=null;
+{
+  const img=new Image();
+  img.onload=()=>createImageBitmap(img).then(bm=>{markerBitmap=bm;});
+  img.src='marker-ar.svg';
+}
 
 function lock(px,py,pz){
   mesh.position.set(px,py||0,pz);
@@ -290,25 +299,24 @@ function setupSession(session){
     .then(()=>session.requestReferenceSpace('local-floor'))
     .then(ref=>{
       xrRef=ref;
-      // Bolha aparece imediatamente à frente do usuário
+      // Bolha aparece imediatamente à frente
       mesh.position.set(0,0,-1.5);
       halo.position.set(0,.004,-1.5);
-      locked=true;scanning=true;scanAccum=0;depthScanTime=0;
+      locked=true;scanning=true;scanAccum=0;markerLocked=false;
       mat.uniforms.uReveal.value=0;haloMat.uniforms.uReveal.value=0;
       lastT=clock.getElapsedTime();
       tapEl.classList.add('hidden');renderer.domElement.style.display='block';
-      status('Aponte para a escultura e aguarde…');
-      // Tenta hit-test para reposicionar
+      status('Aponte a câmera para o marcador impresso…');
+      // Hit-test como fallback
       return session.requestReferenceSpace('viewer')
         .then(vs=>session.requestHitTestSource({space:vs}))
         .catch(()=>null);
-    }).then(hs=>{
-      hitSrc=hs;
-    }).catch(e=>status('Erro: '+e.message));
+    }).then(hs=>{hitSrc=hs;})
+    .catch(e=>status('Erro: '+e.message));
 
   session.addEventListener('end',()=>{
     xrSess=null;xrRef=null;hitSrc=null;
-    scanning=false;locked=false;scanAccum=0;
+    scanning=false;locked=false;scanAccum=0;markerLocked=false;
     mat.uniforms.uReveal.value=0;mat.uniforms.uHand.value=-1;
     haloMat.uniforms.uReveal.value=0;ringMat.opacity=0;
     [...handJointsL,...handJointsR].forEach(j=>j.visible=false);
@@ -321,15 +329,19 @@ tapEl.addEventListener('click',()=>{
   if(xrSess)return;
   if(!navigator.xr){status('WebXR indisponível');return;}
   ensureAudio();
-  navigator.xr.requestSession('immersive-ar',{
+
+  const opts={
     requiredFeatures:['local-floor'],
-    optionalFeatures:['depth-sensing','hit-test','hand-tracking','dom-overlay'],
-    depthSensing:{
-      usagePreference:['cpu-optimized'],
-      dataFormatPreference:['luminance-alpha','float32']
-    },
+    optionalFeatures:['image-tracking','hit-test','hand-tracking','dom-overlay'],
     domOverlay:{root:document.body}
-  }).then(setupSession).catch(e=>alert('Erro AR: '+(e.message||e)));
+  };
+  // Adiciona marcador se já carregou
+  if(markerBitmap){
+    opts.trackedImages=[{image:markerBitmap,widthInMeters:0.20}];
+  }
+  navigator.xr.requestSession('immersive-ar',opts)
+    .then(setupSession)
+    .catch(e=>alert('Erro AR: '+(e.message||e)));
 });
 
 // ── Loop ──────────────────────────────────────────────────────
@@ -347,8 +359,27 @@ renderer.setAnimationLoop((ts,frame)=>{
       mat.uniforms.uReveal.value=rev;haloMat.uniforms.uReveal.value=rev;
     }
 
+    // ── Image tracking: marcador impresso detectado ───────────
+    if(scanning&&frame.getImageTrackingResults){
+      const results=frame.getImageTrackingResults();
+      for(const r of results){
+        if(r.trackingState==='tracked'){
+          const pose=frame.getPose(r.imageSpace,xrRef);
+          if(pose){
+            const p=pose.transform.position;
+            // Marcador fica no chão, bolha centraliza sobre ele
+            lock(p.x,0,p.z);
+            markerLocked=true;
+            status('Marcador encontrado ✓');
+          }
+        }
+      }
+      // Se perdeu o marcador temporariamente mas já achou antes, mantém posição
+      if(!markerLocked) status('Aponte a câmera para o marcador…');
+    }
+
     // ── Hit-test: reposiciona bolha enquanto scanning=true ──
-    if(scanning&&hitSrc){
+    if(scanning&&!markerLocked&&hitSrc){
       const hits=frame.getHitTestResults(hitSrc);
       if(hits.length>0){
         const p=hits[0].getPose(xrRef);

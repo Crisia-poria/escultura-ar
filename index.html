@@ -43,25 +43,21 @@
 import * as THREE from 'three';
 
 // ── Perfil ────────────────────────────────────────────────────
-// Perfil orgânico em domo: largo na base, fecha no topo, com irregularidades
+// Domo liso — curva suave da base até o topo, sem estrangulamentos
 const PROFILE=[
-  [0.00,0.672,0.615],  // base no chão — abertura larga
-  [0.07,0.685,0.628],  // pequeno alargamento orgânico logo acima do chão
-  [0.15,0.668,0.610],
-  [0.23,0.692,0.635],  // lóbulo mais largo — forma irregular
-  [0.32,0.648,0.590],  // estrangulamento suave
-  [0.40,0.670,0.612],  // volta a alargar
-  [0.49,0.612,0.555],
-  [0.57,0.558,0.505],  // outro estrangulamento
-  [0.64,0.580,0.528],  // pequeno lóbulo
-  [0.71,0.490,0.442],
-  [0.78,0.368,0.330],
-  [0.86,0.228,0.202],
-  [0.93,0.108,0.092],
-  [0.97,0.040,0.032],
-  [1.00,0.007,0.005],
+  [0.00,0.680,0.620],
+  [0.10,0.672,0.613],
+  [0.22,0.646,0.589],
+  [0.36,0.598,0.545],
+  [0.50,0.528,0.481],
+  [0.63,0.432,0.394],
+  [0.74,0.314,0.286],
+  [0.84,0.192,0.175],
+  [0.92,0.092,0.083],
+  [0.97,0.030,0.027],
+  [1.00,0.006,0.005],
 ];
-const HEIGHT=0.82, SLICES=60, STACKS=80, MAX_RX=0.692, MAX_RZ=0.635;
+const HEIGHT=0.82, SLICES=60, STACKS=80, MAX_RX=0.680, MAX_RZ=0.620;
 
 function interp(t){
   for(let i=0;i<PROFILE.length-1;i++){
@@ -404,7 +400,7 @@ function updateHands(frame,joints,hand,ref,side){
 
 // ── Estado ────────────────────────────────────────────────────
 let xrSess=null,xrRef=null,xrViewerSpace=null,hitSrc=null;
-let scanning=false,locked=false,scanAccum=0,needsPlace=false;
+let scanning=false,locked=false,scanAccum=0;
 let windPhase=0; // FIX #2: independent wind phase
 const clock=new THREE.Clock();
 let lastT=0;
@@ -432,7 +428,7 @@ function lockBubble(px,pz){
   locked=true;scanning=false;
   pool.visible=false; // FIX #5
   poolMat.uniforms.uFill.value=0;
-  status('Toque a bolha · belisque 1s para mover'); // FIX #3
+  status('Toque a bolha');
 }
 
 function setupSession(session){
@@ -442,17 +438,17 @@ function setupSession(session){
     .then(()=>session.requestReferenceSpace('local-floor'))
     .then(ref=>{
       xrRef=ref;
-      locked=false;scanning=true;scanAccum=0;needsPlace=true;
+      locked=false;scanning=true;scanAccum=0;
       mat.uniforms.uReveal.value=0;
       haloMat.uniforms.uReveal.value=0;poolMat.uniforms.uFill.value=0;
       glowMat.uniforms.uReveal.value=0;causticMat.uniforms.uReveal.value=0;
       partMat.uniforms.uReveal.value=0;
-      prevD.left=2;prevD.right=2;pinchTimer=0;
+      prevD.left=2;prevD.right=2;
       lastT=clock.getElapsedTime();
       tapEl.classList.add('hidden');
       renderer.domElement.style.display='block';
       exitEl.style.display='flex';
-      status('Olhe para a escultura e aguarde…');
+      status('Olhe para o centro da escultura e aguarde 5s…');
       return session.requestReferenceSpace('viewer')
         .then(vs=>{xrViewerSpace=vs;return session.requestHitTestSource({space:vs});})
         .catch(()=>null);
@@ -462,7 +458,7 @@ function setupSession(session){
 
   session.addEventListener('end',()=>{
     xrSess=null;xrRef=null;xrViewerSpace=null;hitSrc=null;
-    scanning=false;locked=false;needsPlace=false;scanAccum=0;
+    scanning=false;locked=false;scanAccum=0;
     mat.uniforms.uReveal.value=0;
     haloMat.uniforms.uReveal.value=0;poolMat.uniforms.uFill.value=0;
     glowMat.uniforms.uReveal.value=0;causticMat.uniforms.uReveal.value=0;
@@ -504,24 +500,6 @@ renderer.setAnimationLoop((ts,frame)=>{
 
   if(!frame||!xrRef){renderer.render(scene,camera);return;}
 
-  const viewerPose=frame.getViewerPose(xrRef);
-
-  // Posiciona bolha na direção do olhar no primeiro frame
-  if(needsPlace&&viewerPose){
-    const vt=viewerPose.transform;
-    const q=vt.orientation;
-    const fx=2*(q.x*q.z+q.w*q.y);
-    const fz=-(1-2*(q.x*q.x+q.y*q.y));
-    const fl=Math.sqrt(fx*fx+fz*fz)||1;
-    const px=vt.position.x+(fx/fl)*1.5;
-    const pz=vt.position.z+(fz/fl)*1.5;
-    pool.position.set(px,.003,pz);
-    placeBubble(px,pz);
-    locked=true;needsPlace=false;
-    pool.visible=false; // FIX #5
-    status('Toque a bolha · belisque 1s para mover'); // FIX #3
-  }
-
   // Revela bolha
   if(locked){
     const rev=Math.min(1,mat.uniforms.uReveal.value+dt*.4);
@@ -547,7 +525,7 @@ renderer.setAnimationLoop((ts,frame)=>{
       }
     } else {
       scanAccum=Math.max(0,scanAccum-dt*3);
-      poolMat.uniforms.uFill.value=Math.min(1,scanAccum/3);
+      poolMat.uniforms.uFill.value=Math.min(1,scanAccum/5);
     }
   }
 

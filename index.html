@@ -49,7 +49,8 @@ const PROFILE=[
   [0.74,0.314,0.286],[0.84,0.192,0.175],[0.92,0.092,0.083],
   [0.97,0.030,0.027],[1.00,0.006,0.005],
 ];
-const HEIGHT=0.82,SLICES=60,STACKS=80,MAX_RX=0.680,MAX_RZ=0.620;
+const SLICES=60,STACKS=80,MAX_RX=0.680,MAX_RZ=0.620;
+const HEIGHT=0.82, HEIGHT2=4.82;
 
 function interp(t){
   for(let i=0;i<PROFILE.length-1;i++){
@@ -59,15 +60,15 @@ function interp(t){
   return PROFILE.at(-1).slice(1);
 }
 
-function buildGeo(){
+function buildGeo(h=HEIGHT){
   const pos=[],nor=[],uv=[],idx=[];
   for(let i=0;i<=STACKS;i++){
     const t=i/STACKS,[rx,rz]=interp(t);
     const e=0.004,[rxU,rzU]=interp(Math.min(t+e,1)),[rxD,rzD]=interp(Math.max(t-e,0));
-    const drx=(rxU-rxD)/(2*e*HEIGHT),drz=(rzU-rzD)/(2*e*HEIGHT);
+    const drx=(rxU-rxD)/(2*e*h),drz=(rzU-rzD)/(2*e*h);
     for(let j=0;j<=SLICES;j++){
       const a=2*Math.PI*j/SLICES,ca=Math.cos(a),sa=Math.sin(a);
-      pos.push(rx*ca,(t-.5)*HEIGHT,rz*sa);
+      pos.push(rx*ca,(t-.5)*h,rz*sa);
       const nx=rz*ca,ny=-rx*drz*sa*sa-rz*drx*ca*ca,nz=rx*sa;
       const nl=Math.sqrt(nx*nx+ny*ny+nz*nz)||1;
       nor.push(nx/nl,ny/nl,nz/nl);uv.push(j/SLICES,t);
@@ -166,10 +167,11 @@ const CAUS_FRAG=`uniform float uTime,uReveal;varying vec2 vU;
 const UV_VERT=`varying vec2 vU;void main(){vU=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`;
 
 // ── Fábrica de domo ───────────────────────────────────────────
-const GEO=buildGeo(); // geometria compartilhada
+const GEO=buildGeo(HEIGHT);
+const GEO2=buildGeo(HEIGHT2);
 const PCOUNT=100;
 
-function makeDome(){
+function makeDome(geo=GEO,h=HEIGHT){
   const mat=new THREE.ShaderMaterial({
     transparent:true,side:THREE.FrontSide,depthWrite:false,
     blending:THREE.CustomBlending,blendEquation:THREE.AddEquation,
@@ -231,10 +233,10 @@ function makeDome(){
 
   return{mat,mesh,haloMat,halo,glowMat,groundGlow,causticMat,caustic,
          partMat,particles,pPosBuf,pLifeBuf,pPosAttr,pLifeAttr,pState,
-         locked:false,hue:0};
+         locked:false,hue:0,h};
 }
 
-const domes=[makeDome(),makeDome()];
+const domes=[makeDome(GEO,HEIGHT),makeDome(GEO2,HEIGHT2)];
 
 // ── Pool de luz ───────────────────────────────────────────────
 const poolMat=new THREE.ShaderMaterial({
@@ -327,7 +329,7 @@ const prevD={left:[2,2],right:[2,2]};
 function ellD(p,dome){
   if(!dome.locked)return 2;
   const lx=(p.x-dome.mesh.position.x)/MAX_RX;
-  const ly=(p.y-dome.mesh.position.y)/(HEIGHT/2);
+  const ly=(p.y-dome.mesh.position.y)/(dome.h/2);
   const lz=(p.z-dome.mesh.position.z)/MAX_RZ;
   return Math.sqrt(lx*lx+ly*ly+lz*lz);
 }
@@ -405,9 +407,9 @@ function status(m){stEl.textContent=m;stEl.style.display=m?'block':'none';}
 exitEl.addEventListener('click',()=>{if(xrSess)xrSess.end();});
 
 function placeDome(dome,px,pz){
-  dome.mesh.position.set(px,HEIGHT/2,pz);
+  dome.mesh.position.set(px,dome.h/2,pz);
   dome.halo.position.set(px,.004,pz);
-  dome.particles.position.set(px,HEIGHT/2,pz);
+  dome.particles.position.set(px,dome.h/2,pz);
   dome.groundGlow.position.set(px,.002,pz);
   dome.caustic.position.set(px,.001,pz);
 }

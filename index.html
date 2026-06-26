@@ -209,7 +209,7 @@ function makeDome(geo=GEO,h=HEIGHT){
     vertexShader:partVert,fragmentShader:partFrag
   });
 
-  const mesh=new THREE.Mesh(GEO,mat);
+  const mesh=new THREE.Mesh(geo,mat);
   const halo=new THREE.Mesh(new THREE.RingGeometry(.05,.70,72),haloMat);
   halo.rotation.x=-Math.PI/2;halo.position.y=.004;
   const groundGlow=new THREE.Mesh(new THREE.CircleGeometry(.68,60),glowMat);
@@ -258,21 +258,25 @@ label.visible=false;scene.add(label);
 // ── Árvore crescendo (domo 1) ─────────────────────────────────
 function buildTree(){
   const segs=[];
-  function branch(ox,oy,oz,dx,dy,dz,len,depth){
-    if(depth<0||len<0.04)return;
-    const ex=ox+dx*len,ey=oy+dy*len,ez=oz+dz*len;
-    segs.push({ox,oy,oz,ex,ey,ez,depth,order:segs.length});
-    if(depth>0){
-      const spread=0.55+depth*0.08;
-      [[1,spread],[-1,spread],[0.6,spread*0.9],[-0.6,spread*0.9]].slice(0,depth>2?4:2).forEach(([sx,ang])=>{
-        const ca=Math.cos(ang),sa2=Math.sin(ang);
-        const px2=dx*ca+sx*dz*sa2,py2=dy*ca+sa2*0.38,pz2=dz*ca-sx*dx*sa2;
-        const nl=Math.sqrt(px2*px2+py2*py2+pz2*pz2)||1;
-        branch(ex,ey,ez,px2/nl,py2/nl,pz2/nl,len*0.68,depth-1);
-      });
+  let ord=0;
+  function branch(start,dir,len,depth){
+    if(depth<0||len<0.05)return;
+    const end=start.clone().addScaledVector(dir,len);
+    segs.push({ox:start.x,oy:start.y,oz:start.z,
+               ex:end.x,ey:end.y,ez:end.z,depth,order:ord++});
+    if(depth===0)return;
+    const count=depth>=4?3:2;
+    for(let i=0;i<count;i++){
+      const angleY=(i/count)*Math.PI*2+(depth*1.1);
+      const tilt=0.38+Math.random()*0.18;
+      // eixo perpendicular ao dir para tilt
+      const perp=new THREE.Vector3(Math.sin(angleY),0,Math.cos(angleY)).normalize();
+      const newDir=dir.clone().multiplyScalar(Math.cos(tilt))
+                      .addScaledVector(perp,Math.sin(tilt)).normalize();
+      branch(end,newDir,len*0.66,depth-1);
     }
   }
-  branch(0,0,0, 0,1,0, 0.9,5);
+  branch(new THREE.Vector3(0,0,0),new THREE.Vector3(0,1,0),1.4,5);
   return segs;
 }
 const treeSegs=buildTree();

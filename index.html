@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-  <title>Bolha virtual sob metal físico</title>
+  <title>Bolha virtual sob metal físico — duo</title>
   <style>
     *{margin:0;padding:0;box-sizing:border-box;}
     html,body{width:100%;height:100%;background:#000;overflow:hidden;}
@@ -42,22 +42,14 @@
 <script type="module">
 import * as THREE from 'three';
 
-// ── Perfil ────────────────────────────────────────────────────
-// Domo liso — curva suave da base até o topo, sem estrangulamentos
+// ── Perfil domo liso ──────────────────────────────────────────
 const PROFILE=[
-  [0.00,0.680,0.620],
-  [0.10,0.672,0.613],
-  [0.22,0.646,0.589],
-  [0.36,0.598,0.545],
-  [0.50,0.528,0.481],
-  [0.63,0.432,0.394],
-  [0.74,0.314,0.286],
-  [0.84,0.192,0.175],
-  [0.92,0.092,0.083],
-  [0.97,0.030,0.027],
-  [1.00,0.006,0.005],
+  [0.00,0.680,0.620],[0.10,0.672,0.613],[0.22,0.646,0.589],
+  [0.36,0.598,0.545],[0.50,0.528,0.481],[0.63,0.432,0.394],
+  [0.74,0.314,0.286],[0.84,0.192,0.175],[0.92,0.092,0.083],
+  [0.97,0.030,0.027],[1.00,0.006,0.005],
 ];
-const HEIGHT=0.82, SLICES=60, STACKS=80, MAX_RX=0.680, MAX_RZ=0.620;
+const HEIGHT=0.82,SLICES=60,STACKS=80,MAX_RX=0.680,MAX_RZ=0.620;
 
 function interp(t){
   for(let i=0;i<PROFILE.length-1;i++){
@@ -74,18 +66,11 @@ function buildGeo(){
     const e=0.004,[rxU,rzU]=interp(Math.min(t+e,1)),[rxD,rzD]=interp(Math.max(t-e,0));
     const drx=(rxU-rxD)/(2*e*HEIGHT),drz=(rzU-rzD)/(2*e*HEIGHT);
     for(let j=0;j<=SLICES;j++){
-      // FIX #1: full circle (2π) in XZ plane; Y is the height axis
       const a=2*Math.PI*j/SLICES,ca=Math.cos(a),sa=Math.sin(a);
-      pos.push(rx*ca, (t-.5)*HEIGHT, rz*sa);
-      // Outward normals via t2 × t1 (height tangent × circumference tangent)
-      // t1=(−rx·sa, 0, rz·ca)  t2=(drx·ca, 1, drz·sa)
-      // n = t2×t1 = (rz·ca, −rx·drz·sa²−rz·drx·ca², rx·sa)
-      const nx=rz*ca;
-      const ny=-rx*drz*sa*sa-rz*drx*ca*ca;
-      const nz=rx*sa;
+      pos.push(rx*ca,(t-.5)*HEIGHT,rz*sa);
+      const nx=rz*ca,ny=-rx*drz*sa*sa-rz*drx*ca*ca,nz=rx*sa;
       const nl=Math.sqrt(nx*nx+ny*ny+nz*nz)||1;
-      nor.push(nx/nl,ny/nl,nz/nl);
-      uv.push(j/SLICES,t);
+      nor.push(nx/nl,ny/nl,nz/nl);uv.push(j/SLICES,t);
     }
   }
   for(let i=0;i<STACKS;i++)for(let j=0;j<SLICES;j++){
@@ -108,124 +93,154 @@ document.body.insertBefore(renderer.domElement,document.getElementById('tap'));
 const scene=new THREE.Scene();
 const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,.01,20);
 
-// ── Shader bolha ──────────────────────────────────────────────
-// FIX #6: FrontSide (was DoubleSide)
-// FIX #8: removed uHand (unused)
-// FIX #2: uWind is now a separate slowly-varying phase (not = uTime)
-// FIX #11: stronger metal aura at base
-const mat=new THREE.ShaderMaterial({
-  transparent:true, side:THREE.FrontSide, depthWrite:false,
-  blending:THREE.CustomBlending,blendEquation:THREE.AddEquation,
-  blendSrc:THREE.SrcAlphaFactor,blendDst:THREE.OneMinusSrcAlphaFactor,
-  uniforms:{uTime:{value:0},uTouch:{value:-99},uHue:{value:0},uReveal:{value:0},uWind:{value:0}},
-  vertexShader:`
-    uniform float uTime,uTouch,uReveal,uWind;
-    varying vec3 vN,vV;varying vec2 vUv;varying float vDisp;
-    float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5);}
-    float ns(vec2 p){vec2 i=floor(p),f=fract(p)*fract(p)*(3.-2.*fract(p));
-      return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y);}
-    void main(){
-      vUv=uv;
-      float dt=uTime-uTouch,alive=step(dt,7.);
-      float wf=dt*.30,dw=abs(uv.y-wf);
-      float tw=exp(-dw*dw*7.)*alive*sin(dt*2.8-uv.y*6.)*max(0.,1.-dt*.08);
-      float slimePull=exp(-dw*dw*3.)*alive*max(0.,1.-dt*.15)*0.06;
-      float wind=sin(uTime*.7-uv.y*3.5+uWind)*.038*sin(uTime*.22+uv.x*2.);
-      float br=sin(uTime*.42+uv.y*1.6)*.009+sin(uTime*.25+uv.x*2.1)*.006;
-      float lq=(ns(uv*2.+vec2(uTime*.09,uTime*.06))-.5)*.012;
-      float d=(tw*.10+slimePull+br+wind+lq)*uReveal;
-      vDisp=d;
-      vN=normalize(normalMatrix*normal);
-      vec4 mv=modelViewMatrix*vec4(position+normal*d,1.);
-      vV=normalize(-mv.xyz);gl_Position=projectionMatrix*mv;
-    }`,
-  fragmentShader:`
-    uniform float uTime,uTouch,uHue,uReveal,uWind;
-    varying vec3 vN,vV;varying vec2 vUv;varying float vDisp;
-    void main(){
-      if(uReveal<=0.)discard;
-      vec3 N=normalize(vN),V=normalize(vV);
-      float NdotV=abs(dot(N,V));
-      float rim=pow(1.-NdotV,1.8),core=pow(NdotV,3.5);
-      float dt=uTime-uTouch,alive=step(dt,7.);
-      float decay=max(0.,1.-dt*.14)*alive;
-      float waveGlow=exp(-pow(vUv.y-dt*.30,2.)*14.)*decay;
-      float ph=rim*7.+vUv.y*3.-uTime*.28+vDisp*38.+uHue+waveGlow*2.;
-      vec3 iri=vec3(.5+.32*cos(ph),.5+.32*cos(ph+2.09),.5+.32*cos(ph+4.19));
-      // FIX #11: stronger metal aura — wider exponent, higher intensity, amber corona
-      float metalBase=pow(1.-vUv.y,2.0)*uReveal*1.6;
-      float metalPulse=(.5+.5*sin(uTime*1.1-vUv.y*5.))*pow(1.-vUv.y,1.2)*1.3;
-      float corona=exp(-vUv.y*5.5)*uReveal*0.7;
-      float emanate=sin(vUv.y*6.28-uTime*1.4)*exp(-vUv.y*3.)*.5+.5;
-      vec3 metalCol=vec3(.98,.70,.12)*(metalBase*.9+metalPulse*.6+corona*.5)
-                   +vec3(.22,.52,.95)*emanate*pow(1.-vUv.y,1.8)*.4;
-      float windVis=sin(uTime*.7-vUv.y*3.5+uWind)*(.5+.5*sin(uTime*.22))*rim*.3;
-      float pulse=.5+.5*sin(uTime*1.3);
-      vec3 col=iri*(rim*.70+pulse*rim*.2+decay*.4+windVis)+metalCol
-              +iri*waveGlow*1.8+vec3(.02,.06,.12)*core*.2;
-      float a=(rim*.68+core*.05+waveGlow*.38+pulse*rim*.15+metalBase*.20+metalPulse*.12+corona*.15)*uReveal;
-      gl_FragColor=vec4(col,clamp(a,0.,.88));
-    }`
-});
+// ── GLSL compartilhado ────────────────────────────────────────
+const VERT=`
+  uniform float uTime,uTouch,uReveal,uWind;
+  varying vec3 vN,vV;varying vec2 vUv;varying float vDisp;
+  float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5);}
+  float ns(vec2 p){vec2 i=floor(p),f=fract(p)*fract(p)*(3.-2.*fract(p));
+    return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y);}
+  void main(){
+    vUv=uv;
+    float dt=uTime-uTouch,alive=step(dt,7.);
+    float wf=dt*.30,dw=abs(uv.y-wf);
+    float tw=exp(-dw*dw*7.)*alive*sin(dt*2.8-uv.y*6.)*max(0.,1.-dt*.08);
+    float slimePull=exp(-dw*dw*3.)*alive*max(0.,1.-dt*.15)*0.06;
+    float wind=sin(uTime*.7-uv.y*3.5+uWind)*.038*sin(uTime*.22+uv.x*2.);
+    float br=sin(uTime*.42+uv.y*1.6)*.009+sin(uTime*.25+uv.x*2.1)*.006;
+    float lq=(ns(uv*2.+vec2(uTime*.09,uTime*.06))-.5)*.012;
+    float d=(tw*.10+slimePull+br+wind+lq)*uReveal;
+    vDisp=d;vN=normalize(normalMatrix*normal);
+    vec4 mv=modelViewMatrix*vec4(position+normal*d,1.);
+    vV=normalize(-mv.xyz);gl_Position=projectionMatrix*mv;
+  }`;
+const FRAG=`
+  uniform float uTime,uTouch,uHue,uReveal,uWind;
+  varying vec3 vN,vV;varying vec2 vUv;varying float vDisp;
+  void main(){
+    if(uReveal<=0.)discard;
+    vec3 N=normalize(vN),V=normalize(vV);
+    float NdotV=abs(dot(N,V));
+    float rim=pow(1.-NdotV,1.8),core=pow(NdotV,3.5);
+    float dt=uTime-uTouch,alive=step(dt,7.);
+    float decay=max(0.,1.-dt*.14)*alive;
+    float waveGlow=exp(-pow(vUv.y-dt*.30,2.)*14.)*decay;
+    float ph=rim*7.+vUv.y*3.-uTime*.28+vDisp*38.+uHue+waveGlow*2.;
+    vec3 iri=vec3(.5+.32*cos(ph),.5+.32*cos(ph+2.09),.5+.32*cos(ph+4.19));
+    float metalBase=pow(1.-vUv.y,2.)*uReveal*1.6;
+    float metalPulse=(.5+.5*sin(uTime*1.1-vUv.y*5.))*pow(1.-vUv.y,1.2)*1.3;
+    float corona=exp(-vUv.y*5.5)*uReveal*0.7;
+    float emanate=sin(vUv.y*6.28-uTime*1.4)*exp(-vUv.y*3.)*.5+.5;
+    vec3 metalCol=vec3(.98,.70,.12)*(metalBase*.9+metalPulse*.6+corona*.5)
+                 +vec3(.22,.52,.95)*emanate*pow(1.-vUv.y,1.8)*.4;
+    float windVis=sin(uTime*.7-vUv.y*3.5+uWind)*(.5+.5*sin(uTime*.22))*rim*.3;
+    float pulse=.5+.5*sin(uTime*1.3);
+    vec3 col=iri*(rim*.70+pulse*rim*.2+decay*.4+windVis)+metalCol
+            +iri*waveGlow*1.8+vec3(.02,.06,.12)*core*.2;
+    float a=(rim*.68+core*.05+waveGlow*.38+pulse*rim*.15+metalBase*.20+metalPulse*.12+corona*.15)*uReveal;
+    gl_FragColor=vec4(col,clamp(a,0.,.88));
+  }`;
+const HALO_FRAG=`uniform float uTime,uReveal;varying vec2 vU;
+  void main(){float r=vU.x;float ph=r*5.-uTime*.4;
+    vec3 c=vec3(.5+.3*cos(ph),.5+.3*cos(ph+2.09),.5+.3*cos(ph+4.19));
+    float a=(1.-r)*.28*(.5+.5*sin(uTime*1.2+r*6.))*uReveal;
+    gl_FragColor=vec4(c,clamp(a,0.,.4));}`;
+const GLOW_FRAG=`uniform float uTime,uReveal;varying vec2 vU;
+  void main(){
+    vec2 uv=vU*2.-1.;float r=length(uv);if(r>1.)discard;
+    float glow=exp(-r*3.2)*(0.7+0.3*sin(uTime*1.9-r*5.5));
+    vec3 col=mix(vec3(.98,.72,.10),vec3(.35,.65,1.),r*r);
+    float a=glow*0.60*uReveal;
+    gl_FragColor=vec4(col,clamp(a,0.,.72));}`;
+const CAUS_FRAG=`uniform float uTime,uReveal;varying vec2 vU;
+  void main(){
+    vec2 uv=vU*2.-1.;float r=length(uv);if(r>1.)discard;
+    float c1=sin(uv.x*9.+uTime*.8+sin(uv.y*7.+uTime*.55)*1.6);
+    float c2=sin(uv.y*10.-uTime*1.1+sin(uv.x*8.-uTime*.45)*1.6);
+    float caus=pow(max(0.,c1*c2),2.2)*1.4;
+    float edge=1.-smoothstep(.65,1.,r);
+    float ph=atan(uv.y,uv.x)+r*4.-uTime*.35;
+    vec3 col=vec3(.5+.3*cos(ph),.5+.3*cos(ph+2.09),.5+.3*cos(ph+4.19));
+    float a=caus*edge*.32*uReveal;
+    gl_FragColor=vec4(col*1.4+.3,clamp(a,0.,.55));}`;
+const UV_VERT=`varying vec2 vU;void main(){vU=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`;
 
-// ── Halo no chão ──────────────────────────────────────────────
-const haloMat=new THREE.ShaderMaterial({
-  transparent:true,depthWrite:false,side:THREE.DoubleSide,
-  uniforms:{uTime:{value:0},uReveal:{value:0}},
-  vertexShader:`varying vec2 vU;void main(){vU=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
-  fragmentShader:`uniform float uTime,uReveal;varying vec2 vU;
-    void main(){float r=vU.x;float ph=r*5.-uTime*.4;
-      vec3 c=vec3(.5+.3*cos(ph),.5+.3*cos(ph+2.09),.5+.3*cos(ph+4.19));
-      float a=(1.-r)*.28*(.5+.5*sin(uTime*1.2+r*6.))*uReveal;
-      gl_FragColor=vec4(c,clamp(a,0.,.4));}`
-});
-const halo=new THREE.Mesh(new THREE.RingGeometry(.05,.70,72),haloMat);
-halo.rotation.x=-Math.PI/2;halo.position.y=.004;scene.add(halo);
+// ── Fábrica de domo ───────────────────────────────────────────
+const GEO=buildGeo(); // geometria compartilhada
+const PCOUNT=100;
 
-// ── Aura dourada no chão (FIX #11) ───────────────────────────
-const glowMat=new THREE.ShaderMaterial({
-  transparent:true,depthWrite:false,side:THREE.DoubleSide,
-  uniforms:{uTime:{value:0},uReveal:{value:0}},
-  vertexShader:`varying vec2 vU;void main(){vU=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
-  fragmentShader:`uniform float uTime,uReveal;varying vec2 vU;
-    void main(){
-      vec2 uv=vU*2.-1.;float r=length(uv);if(r>1.)discard;
-      float glow=exp(-r*3.2)*(0.7+0.3*sin(uTime*1.9-r*5.5));
-      vec3 col=mix(vec3(.98,.72,.10),vec3(.35,.65,1.),r*r);
-      float a=glow*0.60*uReveal;
-      gl_FragColor=vec4(col,clamp(a,0.,.72));}`
-});
-const groundGlow=new THREE.Mesh(new THREE.CircleGeometry(.68,60),glowMat);
-groundGlow.rotation.x=-Math.PI/2;groundGlow.position.y=.002;scene.add(groundGlow);
+function makeDome(){
+  const mat=new THREE.ShaderMaterial({
+    transparent:true,side:THREE.FrontSide,depthWrite:false,
+    blending:THREE.CustomBlending,blendEquation:THREE.AddEquation,
+    blendSrc:THREE.SrcAlphaFactor,blendDst:THREE.OneMinusSrcAlphaFactor,
+    uniforms:{uTime:{value:0},uTouch:{value:-99},uHue:{value:0},uReveal:{value:0},uWind:{value:0}},
+    vertexShader:VERT,fragmentShader:FRAG
+  });
+  const haloMat=new THREE.ShaderMaterial({
+    transparent:true,depthWrite:false,side:THREE.DoubleSide,
+    uniforms:{uTime:{value:0},uReveal:{value:0}},
+    vertexShader:UV_VERT,fragmentShader:HALO_FRAG
+  });
+  const glowMat=new THREE.ShaderMaterial({
+    transparent:true,depthWrite:false,side:THREE.DoubleSide,
+    uniforms:{uTime:{value:0},uReveal:{value:0}},
+    vertexShader:UV_VERT,fragmentShader:GLOW_FRAG
+  });
+  const causticMat=new THREE.ShaderMaterial({
+    transparent:true,depthWrite:false,side:THREE.DoubleSide,
+    uniforms:{uTime:{value:0},uReveal:{value:0}},
+    vertexShader:UV_VERT,fragmentShader:CAUS_FRAG
+  });
+  const partVert=`attribute float aLife;varying float vLife;
+    void main(){vLife=aLife;vec4 mv=modelViewMatrix*vec4(position,1.);
+      gl_PointSize=mix(9.,1.5,vLife*vLife);gl_Position=projectionMatrix*mv;}`;
+  const partFrag=`uniform float uReveal,uTime;varying float vLife;
+    void main(){vec2 pc=gl_PointCoord*2.-1.;if(length(pc)>1.)discard;
+      float ph=vLife*12.566+uTime*.6;
+      vec3 col=vec3(.5+.35*cos(ph),.5+.35*cos(ph+2.09),.5+.35*cos(ph+4.19));
+      float a=(1.-length(pc))*(1.-vLife*vLife)*uReveal*.75;
+      gl_FragColor=vec4(col,clamp(a,0.,.8));}`;
+  const partMat=new THREE.ShaderMaterial({
+    transparent:true,depthWrite:false,
+    uniforms:{uReveal:{value:0},uTime:{value:0}},
+    vertexShader:partVert,fragmentShader:partFrag
+  });
 
-// ── Cáusticas no chão (FIX #10) ──────────────────────────────
-const causticMat=new THREE.ShaderMaterial({
-  transparent:true,depthWrite:false,side:THREE.DoubleSide,
-  uniforms:{uTime:{value:0},uReveal:{value:0}},
-  vertexShader:`varying vec2 vU;void main(){vU=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
-  fragmentShader:`uniform float uTime,uReveal;varying vec2 vU;
-    void main(){
-      vec2 uv=vU*2.-1.;float r=length(uv);if(r>1.)discard;
-      float c1=sin(uv.x*9.+uTime*.8+sin(uv.y*7.+uTime*.55)*1.6);
-      float c2=sin(uv.y*10.-uTime*1.1+sin(uv.x*8.-uTime*.45)*1.6);
-      float caus=pow(max(0.,c1*c2),2.2)*1.4;
-      float edge=1.-smoothstep(.65,1.,r);
-      float ph=atan(uv.y,uv.x)+r*4.-uTime*.35;
-      vec3 col=vec3(.5+.3*cos(ph),.5+.3*cos(ph+2.09),.5+.3*cos(ph+4.19));
-      float a=caus*edge*.32*uReveal;
-      gl_FragColor=vec4(col*1.4+.3,clamp(a,0.,.55));}`
-});
-const caustic=new THREE.Mesh(new THREE.CircleGeometry(.68,60),causticMat);
-caustic.rotation.x=-Math.PI/2;caustic.position.y=.001;scene.add(caustic);
+  const mesh=new THREE.Mesh(GEO,mat);
+  const halo=new THREE.Mesh(new THREE.RingGeometry(.05,.70,72),haloMat);
+  halo.rotation.x=-Math.PI/2;halo.position.y=.004;
+  const groundGlow=new THREE.Mesh(new THREE.CircleGeometry(.68,60),glowMat);
+  groundGlow.rotation.x=-Math.PI/2;groundGlow.position.y=.002;
+  const caustic=new THREE.Mesh(new THREE.CircleGeometry(.68,60),causticMat);
+  caustic.rotation.x=-Math.PI/2;caustic.position.y=.001;
 
-// ── Mesh bolha ────────────────────────────────────────────────
-const mesh=new THREE.Mesh(buildGeo(),mat);scene.add(mesh);
+  const pPosBuf=new Float32Array(PCOUNT*3),pLifeBuf=new Float32Array(PCOUNT);
+  const pState=Array.from({length:PCOUNT},()=>({
+    life:Math.random(),speed:0.18+Math.random()*0.28,
+    angle:Math.random()*Math.PI*2,r:Math.random()*MAX_RX*.82
+  }));
+  const pGeo=new THREE.BufferGeometry();
+  const pPosAttr=new THREE.BufferAttribute(pPosBuf,3);
+  const pLifeAttr=new THREE.BufferAttribute(pLifeBuf,1);
+  pGeo.setAttribute('position',pPosAttr);pGeo.setAttribute('aLife',pLifeAttr);
+  const particles=new THREE.Points(pGeo,partMat);
+  particles.visible=false;
 
-// ── Pool de luz (cursor de posicionamento) ────────────────────
+  scene.add(mesh,halo,groundGlow,caustic,particles);
+
+  return{mat,mesh,haloMat,halo,glowMat,groundGlow,causticMat,caustic,
+         partMat,particles,pPosBuf,pLifeBuf,pPosAttr,pLifeAttr,pState,
+         locked:false,hue:0};
+}
+
+const domes=[makeDome(),makeDome()];
+
+// ── Pool de luz ───────────────────────────────────────────────
 const poolMat=new THREE.ShaderMaterial({
   transparent:true,depthWrite:false,side:THREE.DoubleSide,
   uniforms:{uTime:{value:0},uFill:{value:0}},
-  vertexShader:`varying vec2 vU;void main(){vU=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
+  vertexShader:UV_VERT,
   fragmentShader:`
     uniform float uTime,uFill;varying vec2 vU;
     float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5);}
@@ -233,147 +248,68 @@ const poolMat=new THREE.ShaderMaterial({
       return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y);}
     void main(){
       if(uFill<=0.)discard;
-      vec2 uv=vU*2.-1.;float r=length(uv);
-      if(r>1.)discard;
+      vec2 uv=vU*2.-1.;float r=length(uv);if(r>1.)discard;
       float edge=1.-r;
       float ripple=sin(r*12.-uTime*2.8)*.5+.5;
       float spiral=sin(atan(uv.y,uv.x)*5.+uTime*1.2-r*8.)*.5+.5;
       float noise=ns(uv*3.+uTime*.3);
       float ph=r*4.-uTime*.5+spiral*2.;
       vec3 col=vec3(.5+.3*cos(ph),.5+.3*cos(ph+2.09),.5+.3*cos(ph+4.19));
-      float waveFront=uFill*1.3;
-      float waveGlow=exp(-pow(r-waveFront,2.)*18.)*uFill;
+      float waveGlow=exp(-pow(r-uFill*1.3,2.)*18.)*uFill;
       float a=(edge*edge*(ripple*.4+spiral*.3+noise*.3)*.18+waveGlow*.6)*uFill;
-      gl_FragColor=vec4(col+waveGlow*.4,clamp(a,0.,.7));
-    }`
+      gl_FragColor=vec4(col+waveGlow*.4,clamp(a,0.,.7));}`
 });
 const pool=new THREE.Mesh(new THREE.CircleGeometry(.7,72),poolMat);
 pool.rotation.x=-Math.PI/2;pool.visible=false;scene.add(pool);
 
-// ── Partículas ascendentes (FIX #9) ──────────────────────────
-const PCOUNT=120;
-const pPosBuf=new Float32Array(PCOUNT*3);
-const pLifeBuf=new Float32Array(PCOUNT);
-const pState=Array.from({length:PCOUNT},()=>({
-  life:Math.random(), speed:0.18+Math.random()*0.28,
-  angle:Math.random()*Math.PI*2, r:Math.random()*MAX_RX*.82
-}));
-const pGeo=new THREE.BufferGeometry();
-const pPosAttr=new THREE.BufferAttribute(pPosBuf,3);
-const pLifeAttr=new THREE.BufferAttribute(pLifeBuf,1);
-pGeo.setAttribute('position',pPosAttr);
-pGeo.setAttribute('aLife',pLifeAttr);
-const partMat=new THREE.ShaderMaterial({
-  transparent:true,depthWrite:false,
-  uniforms:{uReveal:{value:0},uTime:{value:0}},
-  vertexShader:`
-    attribute float aLife;varying float vLife;
-    void main(){
-      vLife=aLife;
-      vec4 mv=modelViewMatrix*vec4(position,1.);
-      gl_PointSize=mix(9.,1.5,vLife*vLife);
-      gl_Position=projectionMatrix*mv;
-    }`,
-  fragmentShader:`
-    uniform float uReveal,uTime;varying float vLife;
-    void main(){
-      vec2 pc=gl_PointCoord*2.-1.;
-      if(length(pc)>1.)discard;
-      float ph=vLife*12.566+uTime*.6;
-      vec3 col=vec3(.5+.35*cos(ph),.5+.35*cos(ph+2.09),.5+.35*cos(ph+4.19));
-      float a=(1.-length(pc))*(1.-vLife*vLife)*uReveal*.75;
-      gl_FragColor=vec4(col,clamp(a,0.,.8));
-    }`
-});
-const particles=new THREE.Points(pGeo,partMat);
-particles.visible=false;scene.add(particles);
-
-function updateParticles(dt,t){
-  if(!locked){particles.visible=false;return;}
-  particles.visible=true;
-  particles.position.set(mesh.position.x,HEIGHT/2,mesh.position.z);
-  partMat.uniforms.uTime.value=t;
-  partMat.uniforms.uReveal.value=mat.uniforms.uReveal.value;
-  pState.forEach((p,i)=>{
-    p.life+=dt*p.speed;
-    if(p.life>=1){p.life=0;p.angle=Math.random()*Math.PI*2;p.r=Math.random()*MAX_RX*.82;}
-    const r=p.r*(1-p.life*.85);
-    const ang=p.angle+p.life*Math.PI*2;
-    pPosBuf[i*3]=r*Math.cos(ang);
-    pPosBuf[i*3+1]=(p.life-.5)*HEIGHT;
-    pPosBuf[i*3+2]=r*Math.sin(ang);
-    pLifeBuf[i]=p.life;
-  });
-  pPosAttr.needsUpdate=true;
-  pLifeAttr.needsUpdate=true;
-}
-
-// ── Partículas burst (partes soltando ao toque) ───────────────
+// ── Burst ─────────────────────────────────────────────────────
 const BCOUNT=28;
-const bPosBuf=new Float32Array(BCOUNT*3);
-const bLifeBuf=new Float32Array(BCOUNT);
+const bPosBuf=new Float32Array(BCOUNT*3),bLifeBuf=new Float32Array(BCOUNT);
 const bVel=Array.from({length:BCOUNT},()=>({x:0,y:0,z:0}));
 let burstActive=false;
 const bGeo=new THREE.BufferGeometry();
-const bPosAttr2=new THREE.BufferAttribute(bPosBuf,3);
-const bLifeAttr2=new THREE.BufferAttribute(bLifeBuf,1);
-bGeo.setAttribute('position',bPosAttr2);
-bGeo.setAttribute('aLife',bLifeAttr2);
+const bPosAttr=new THREE.BufferAttribute(bPosBuf,3);
+const bLifeAttr=new THREE.BufferAttribute(bLifeBuf,1);
+bGeo.setAttribute('position',bPosAttr);bGeo.setAttribute('aLife',bLifeAttr);
 const burstMat=new THREE.ShaderMaterial({
-  transparent:true,depthWrite:false,
-  uniforms:{uTime:{value:0}},
-  vertexShader:`
-    attribute float aLife;varying float vLife;
-    void main(){
-      vLife=aLife;
-      vec4 mv=modelViewMatrix*vec4(position,1.);
-      gl_PointSize=mix(14.,1.5,vLife*vLife);
-      gl_Position=projectionMatrix*mv;
-    }`,
-  fragmentShader:`
-    uniform float uTime;varying float vLife;
-    void main(){
-      vec2 pc=gl_PointCoord*2.-1.;if(length(pc)>1.)discard;
+  transparent:true,depthWrite:false,uniforms:{uTime:{value:0}},
+  vertexShader:`attribute float aLife;varying float vLife;
+    void main(){vLife=aLife;vec4 mv=modelViewMatrix*vec4(position,1.);
+      gl_PointSize=mix(14.,1.5,vLife*vLife);gl_Position=projectionMatrix*mv;}`,
+  fragmentShader:`uniform float uTime;varying float vLife;
+    void main(){vec2 pc=gl_PointCoord*2.-1.;if(length(pc)>1.)discard;
       float ph=vLife*10.+uTime*.9;
       vec3 col=vec3(.5+.4*cos(ph),.5+.4*cos(ph+2.09),.5+.4*cos(ph+4.19));
       float a=(1.-length(pc))*max(0.,1.-vLife*1.4);
-      gl_FragColor=vec4(col,clamp(a,0.,.92));
-    }`
+      gl_FragColor=vec4(col,clamp(a,0.,.92));}`
 });
 const burstPoints=new THREE.Points(bGeo,burstMat);
 burstPoints.visible=false;scene.add(burstPoints);
 
 function triggerBurst(p){
   for(let i=0;i<BCOUNT;i++){
-    bPosBuf[i*3]=p.x;bPosBuf[i*3+1]=p.y;bPosBuf[i*3+2]=p.z;
-    bLifeBuf[i]=0;
-    const th=Math.random()*Math.PI*2,ph2=Math.random()*Math.PI*.8;
-    const sp=0.4+Math.random()*0.7;
+    bPosBuf[i*3]=p.x;bPosBuf[i*3+1]=p.y;bPosBuf[i*3+2]=p.z;bLifeBuf[i]=0;
+    const th=Math.random()*Math.PI*2,ph2=Math.random()*Math.PI*.8,sp=0.4+Math.random()*0.7;
     bVel[i]={x:Math.sin(ph2)*Math.cos(th)*sp,y:Math.cos(ph2)*sp*.6+0.15,z:Math.sin(ph2)*Math.sin(th)*sp};
   }
-  bPosAttr2.needsUpdate=true;bLifeAttr2.needsUpdate=true;
+  bPosAttr.needsUpdate=true;bLifeAttr.needsUpdate=true;
   burstActive=true;burstPoints.visible=true;
 }
-
 function updateBurst(dt,t){
   if(!burstActive)return;
   burstMat.uniforms.uTime.value=t;
   let alive=false;
   for(let i=0;i<BCOUNT;i++){
     bLifeBuf[i]+=dt*0.38;
-    if(bLifeBuf[i]<1){
-      alive=true;
-      bPosBuf[i*3]+=bVel[i].x*dt;
-      bPosBuf[i*3+1]+=bVel[i].y*dt;
-      bPosBuf[i*3+2]+=bVel[i].z*dt;
-      bVel[i].y-=2.2*dt;
-    }
+    if(bLifeBuf[i]<1){alive=true;
+      bPosBuf[i*3]+=bVel[i].x*dt;bPosBuf[i*3+1]+=bVel[i].y*dt;bPosBuf[i*3+2]+=bVel[i].z*dt;
+      bVel[i].y-=2.2*dt;}
   }
-  bPosAttr2.needsUpdate=true;bLifeAttr2.needsUpdate=true;
+  bPosAttr.needsUpdate=true;bLifeAttr.needsUpdate=true;
   if(!alive){burstActive=false;burstPoints.visible=false;}
 }
 
-// ── Joints das mãos ───────────────────────────────────────────
+// ── Mãos ──────────────────────────────────────────────────────
 const JNAMES=['wrist',
   'thumb-metacarpal','thumb-phalanx-proximal','thumb-phalanx-distal','thumb-tip',
   'index-finger-metacarpal','index-finger-phalanx-proximal','index-finger-phalanx-intermediate','index-finger-phalanx-distal','index-finger-tip',
@@ -382,10 +318,42 @@ const JNAMES=['wrist',
   'pinky-finger-metacarpal','pinky-finger-phalanx-proximal','pinky-finger-phalanx-intermediate','pinky-finger-phalanx-distal','pinky-finger-tip',
 ];
 const TIP_NAMES=new Set(['index-finger-tip','middle-finger-tip','thumb-tip','ring-finger-tip','pinky-finger-tip']);
-const handMat=new THREE.MeshBasicMaterial({color:0xaaddff,transparent:true,opacity:.35});
+const handMat=new THREE.MeshBasicMaterial({color:0xaaddff,transparent:true,opacity:.32});
 const jointGeo=new THREE.SphereGeometry(.007,6,6);
 function makeJoints(){return JNAMES.map(()=>{const s=new THREE.Mesh(jointGeo,handMat);s.visible=false;scene.add(s);return s;});}
 const handJointsL=makeJoints(),handJointsR=makeJoints();
+const prevD={left:[2,2],right:[2,2]};
+
+function ellD(p,dome){
+  if(!dome.locked)return 2;
+  const lx=(p.x-dome.mesh.position.x)/MAX_RX;
+  const ly=(p.y-dome.mesh.position.y)/(HEIGHT/2);
+  const lz=(p.z-dome.mesh.position.z)/MAX_RZ;
+  return Math.sqrt(lx*lx+ly*ly+lz*lz);
+}
+
+function updateHands(frame,joints,hand,ref,side,t){
+  JNAMES.forEach((name,i)=>{
+    const jt=hand.get(name);
+    if(!jt){joints[i].visible=false;return;}
+    const pose=frame.getJointPose(jt,ref);
+    if(!pose){joints[i].visible=false;return;}
+    const p=pose.transform.position;
+    joints[i].position.set(p.x,p.y,p.z);joints[i].visible=true;
+    if(TIP_NAMES.has(name)){
+      domes.forEach((dome,di)=>{
+        const d=ellD(p,dome);
+        if(prevD[side][di]>1.05&&d<=1.0){
+          playMetalWobble(.9);
+          dome.mat.uniforms.uTouch.value=t;
+          dome.hue+=Math.PI*.72;dome.mat.uniforms.uHue.value=dome.hue;
+          triggerBurst(p);
+        }
+        prevD[side][di]=d<prevD[side][di]?d:Math.min(2,prevD[side][di]+.03);
+      });
+    }
+  });
+}
 
 // ── Som ───────────────────────────────────────────────────────
 let audioCtx=null;
@@ -395,7 +363,6 @@ function ensureAudio(){
 }
 function playMetalWobble(vol=1.0){
   ensureAudio();const ac=audioCtx,now=ac.currentTime;
-  // Reverb: dois delays cruzados para profundidade espacial
   const rev1=ac.createDelay(3);rev1.delayTime.value=0.11;
   const rev2=ac.createDelay(3);rev2.delayTime.value=0.17;
   const fb1=ac.createGain();fb1.gain.value=0.42;
@@ -404,69 +371,30 @@ function playMetalWobble(vol=1.0){
   rev1.connect(fb1);fb1.connect(rev1);rev1.connect(wet);
   rev2.connect(fb2);fb2.connect(rev2);rev2.connect(wet);
   wet.connect(ac.destination);
-  // Modos de vibração de chapa de alumínio fina
-  // [freq, amplitude, dur] — frequências baixas e irregulares como chapa real
   [[38,1.00,7.0],[55,0.72,6.2],[81,0.45,5.4],[112,0.22,4.5],[167,0.10,3.8]].forEach(([f,g,dur])=>{
-    // Par levemente desafinado → beating orgânico (oscilação irregular)
     const o1=ac.createOscillator(),o2=ac.createOscillator();
-    // LFO lento e aleatório → chapa balançando de forma irregular
     const lfo=ac.createOscillator(),lfoG=ac.createGain();
-    lfo.frequency.value=0.25+Math.random()*0.6;  // 0.25–0.85 Hz
-    lfoG.gain.value=f*0.018;
+    lfo.frequency.value=0.25+Math.random()*0.6;lfoG.gain.value=f*0.018;
     lfo.connect(lfoG);lfoG.connect(o1.frequency);lfoG.connect(o2.frequency);
     lfo.start(now);lfo.stop(now+dur);
     o1.type='sine';o2.type='sine';
-    o1.frequency.value=f;
-    o2.frequency.value=f*(1.002+Math.random()*.004);
+    o1.frequency.value=f;o2.frequency.value=f*(1.002+Math.random()*.004);
     const gn=ac.createGain();
     gn.gain.setValueAtTime(0,now);
-    gn.gain.linearRampToValueAtTime(vol*g*0.18,now+0.12); // ataque bem suave
-    gn.gain.setTargetAtTime(vol*g*0.12,now+0.4,dur*0.28); // sustain irregular
-    gn.gain.setTargetAtTime(0,now+dur*0.45,dur*0.42);     // fade longo
+    gn.gain.linearRampToValueAtTime(vol*g*0.18,now+0.12);
+    gn.gain.setTargetAtTime(vol*g*0.12,now+0.4,dur*0.28);
+    gn.gain.setTargetAtTime(0,now+dur*0.45,dur*0.42);
     o1.connect(gn);o2.connect(gn);
     gn.connect(ac.destination);gn.connect(rev1);gn.connect(rev2);
-    o1.start(now);o1.stop(now+dur+2);
-    o2.start(now);o2.stop(now+dur+2);
-  });
-}
-
-// ── Toque / surface detection ──────────────────────────────────
-const prevD={left:2,right:2};
-let hue=0;
-// FIX #1: ellD uses correct Y axis (height) with mesh.position.y = HEIGHT/2
-function ellD(p){
-  if(!locked)return 2;
-  const lx=(p.x-mesh.position.x)/MAX_RX;
-  const ly=(p.y-mesh.position.y)/(HEIGHT/2);
-  const lz=(p.z-mesh.position.z)/MAX_RZ;
-  return Math.sqrt(lx*lx+ly*ly+lz*lz);
-}
-
-
-function updateHands(frame,joints,hand,ref,side){
-  JNAMES.forEach((name,i)=>{
-    const jt=hand.get(name);
-    if(!jt){joints[i].visible=false;return;}
-    const pose=frame.getJointPose(jt,ref);
-    if(!pose){joints[i].visible=false;return;}
-    const p=pose.transform.position;
-    joints[i].position.set(p.x,p.y,p.z);joints[i].visible=true;
-    if(TIP_NAMES.has(name)&&locked){
-      const d=ellD(p);
-      if(prevD[side]>1.05&&d<=1.0){
-        playMetalWobble(.9);mat.uniforms.uTouch.value=clock.getElapsedTime();
-        hue+=Math.PI*.72;mat.uniforms.uHue.value=hue;
-        triggerBurst(p);
-      }
-      prevD[side]=d<prevD[side]?d:Math.min(2,prevD[side]+.03);
-    }
+    o1.start(now);o1.stop(now+dur+2);o2.start(now);o2.stop(now+dur+2);
   });
 }
 
 // ── Estado ────────────────────────────────────────────────────
+const LOCK_TIME=30; // segundos de foco por escultura
 let xrSess=null,xrRef=null,xrViewerSpace=null,hitSrc=null;
-let scanning=false,locked=false,scanAccum=0;
-let windPhase=0; // FIX #2: independent wind phase
+let lockedCount=0,scanning=false,scanAccum=0;
+let windPhase=0;
 const clock=new THREE.Clock();
 let lastT=0;
 
@@ -474,26 +402,61 @@ const tapEl=document.getElementById('tap');
 const stEl=document.getElementById('st');
 const exitEl=document.getElementById('exit');
 function status(m){stEl.textContent=m;stEl.style.display=m?'block':'none';}
-
 exitEl.addEventListener('click',()=>{if(xrSess)xrSess.end();});
 
-// FIX #1: mesh placed at HEIGHT/2 so bottom sits on floor
-// FIX #5: pool.visible managed explicitly
-function placeBubble(px,pz){
-  mesh.position.set(px,HEIGHT/2,pz);
-  halo.position.set(px,.004,pz);
-  particles.position.set(px,HEIGHT/2,pz);
-  groundGlow.position.set(px,.002,pz);
-  caustic.position.set(px,.001,pz);
+function placeDome(dome,px,pz){
+  dome.mesh.position.set(px,HEIGHT/2,pz);
+  dome.halo.position.set(px,.004,pz);
+  dome.particles.position.set(px,HEIGHT/2,pz);
+  dome.groundGlow.position.set(px,.002,pz);
+  dome.caustic.position.set(px,.001,pz);
 }
 
-function lockBubble(px,pz){
-  pool.position.set(px,.003,pz);
-  placeBubble(px,pz);
-  locked=true;scanning=false;
-  pool.visible=false; // FIX #5
+function lockDome(idx,px,pz){
+  const dome=domes[idx];
+  placeDome(dome,px,pz);
+  dome.locked=true;
+  pool.visible=false;
   poolMat.uniforms.uFill.value=0;
-  status('Toque a bolha');
+  scanAccum=0;
+  lockedCount++;
+  if(lockedCount<2){
+    scanning=true;
+    status('Agora olhe para a segunda escultura e aguarde 30s…');
+  } else {
+    scanning=false;
+    status('Toque as bolhas');
+  }
+}
+
+function updateParticles(dome,dt,t){
+  if(!dome.locked){dome.particles.visible=false;return;}
+  dome.particles.visible=true;
+  dome.partMat.uniforms.uTime.value=t;
+  dome.partMat.uniforms.uReveal.value=dome.mat.uniforms.uReveal.value;
+  dome.pState.forEach((p,i)=>{
+    p.life+=dt*p.speed;
+    if(p.life>=1){p.life=0;p.angle=Math.random()*Math.PI*2;p.r=Math.random()*MAX_RX*.82;}
+    const r=p.r*(1-p.life*.85),ang=p.angle+p.life*Math.PI*2;
+    dome.pPosBuf[i*3]=r*Math.cos(ang);
+    dome.pPosBuf[i*3+1]=(p.life-.5)*HEIGHT;
+    dome.pPosBuf[i*3+2]=r*Math.sin(ang);
+    dome.pLifeBuf[i]=p.life;
+  });
+  dome.pPosAttr.needsUpdate=true;dome.pLifeAttr.needsUpdate=true;
+}
+
+function resetAll(){
+  lockedCount=0;scanning=false;scanAccum=0;
+  domes.forEach(d=>{
+    d.locked=false;d.hue=0;
+    d.mat.uniforms.uReveal.value=0;d.mat.uniforms.uTouch.value=-99;d.mat.uniforms.uHue.value=0;
+    d.haloMat.uniforms.uReveal.value=0;d.glowMat.uniforms.uReveal.value=0;
+    d.causticMat.uniforms.uReveal.value=0;d.partMat.uniforms.uReveal.value=0;
+    d.particles.visible=false;
+  });
+  pool.visible=false;poolMat.uniforms.uFill.value=0;
+  prevD.left=[2,2];prevD.right=[2,2];
 }
 
 function setupSession(session){
@@ -503,17 +466,12 @@ function setupSession(session){
     .then(()=>session.requestReferenceSpace('local-floor'))
     .then(ref=>{
       xrRef=ref;
-      locked=false;scanning=true;scanAccum=0;
-      mat.uniforms.uReveal.value=0;
-      haloMat.uniforms.uReveal.value=0;poolMat.uniforms.uFill.value=0;
-      glowMat.uniforms.uReveal.value=0;causticMat.uniforms.uReveal.value=0;
-      partMat.uniforms.uReveal.value=0;
-      prevD.left=2;prevD.right=2;
+      resetAll();scanning=true;
       lastT=clock.getElapsedTime();
       tapEl.classList.add('hidden');
       renderer.domElement.style.display='block';
       exitEl.style.display='flex';
-      status('Olhe para o centro da escultura e aguarde 5s…');
+      status('Olhe para a primeira escultura e aguarde 30s…');
       return session.requestReferenceSpace('viewer')
         .then(vs=>{xrViewerSpace=vs;return session.requestHitTestSource({space:vs});})
         .catch(()=>null);
@@ -523,12 +481,7 @@ function setupSession(session){
 
   session.addEventListener('end',()=>{
     xrSess=null;xrRef=null;xrViewerSpace=null;hitSrc=null;
-    scanning=false;locked=false;scanAccum=0;
-    mat.uniforms.uReveal.value=0;
-    haloMat.uniforms.uReveal.value=0;poolMat.uniforms.uFill.value=0;
-    glowMat.uniforms.uReveal.value=0;causticMat.uniforms.uReveal.value=0;
-    partMat.uniforms.uReveal.value=0;
-    pool.visible=false;particles.visible=false; // FIX #5
+    resetAll();
     [...handJointsL,...handJointsR].forEach(j=>{j.visible=false;});
     renderer.domElement.style.display='none';
     tapEl.classList.remove('hidden');
@@ -552,31 +505,30 @@ tapEl.addEventListener('click',()=>{
 renderer.setAnimationLoop((ts,frame)=>{
   const t=clock.getElapsedTime();
   const dt=Math.min(t-lastT,.05);lastT=t;
-
-  // FIX #2: wind is a slowly drifting phase (not = uTime)
   windPhase+=dt*0.14;
 
-  mat.uniforms.uTime.value=t;
-  mat.uniforms.uWind.value=windPhase;
-  haloMat.uniforms.uTime.value=t;
+  domes.forEach(d=>{
+    d.mat.uniforms.uTime.value=t;d.mat.uniforms.uWind.value=windPhase;
+    d.haloMat.uniforms.uTime.value=t;d.glowMat.uniforms.uTime.value=t;
+    d.causticMat.uniforms.uTime.value=t;
+  });
   poolMat.uniforms.uTime.value=t;
-  glowMat.uniforms.uTime.value=t;
-  causticMat.uniforms.uTime.value=t;
 
   if(!frame||!xrRef){renderer.render(scene,camera);return;}
 
-  // Revela bolha
-  if(locked){
-    const rev=Math.min(1,mat.uniforms.uReveal.value+dt*.4);
-    mat.uniforms.uReveal.value=rev;
-    haloMat.uniforms.uReveal.value=rev;
-    glowMat.uniforms.uReveal.value=rev;
-    causticMat.uniforms.uReveal.value=rev;
-  }
+  // Revela domos bloqueados
+  domes.forEach(d=>{
+    if(!d.locked)return;
+    const rev=Math.min(1,d.mat.uniforms.uReveal.value+dt*.4);
+    d.mat.uniforms.uReveal.value=rev;
+    d.haloMat.uniforms.uReveal.value=rev;
+    d.glowMat.uniforms.uReveal.value=rev;
+    d.causticMat.uniforms.uReveal.value=rev;
+  });
 
-  // Hit-test: pool de luz guia reposicionamento
+  // Hit-test: cursor para próximo domo
   if(scanning&&hitSrc){
-    pool.visible=true; // FIX #5
+    pool.visible=true;
     const hits=frame.getHitTestResults(hitSrc);
     if(hits.length>0){
       const p=hits[0].getPose(xrRef);
@@ -584,18 +536,19 @@ renderer.setAnimationLoop((ts,frame)=>{
         const hx=p.transform.position.x,hz=p.transform.position.z;
         pool.position.set(hx,.003,hz);
         scanAccum+=dt;
-        poolMat.uniforms.uFill.value=Math.min(1,scanAccum/5);
+        const fill=Math.min(1,scanAccum/LOCK_TIME);
+        poolMat.uniforms.uFill.value=fill;
         pool.scale.setScalar(1+.04*Math.sin(t*4));
-        if(scanAccum>=5){lockBubble(hx,hz);}
+        if(scanAccum>=LOCK_TIME)lockDome(lockedCount,hx,hz);
       }
     } else {
-      scanAccum=Math.max(0,scanAccum-dt*3);
-      poolMat.uniforms.uFill.value=Math.min(1,scanAccum/5);
+      scanAccum=Math.max(0,scanAccum-dt*2);
+      poolMat.uniforms.uFill.value=Math.min(1,scanAccum/LOCK_TIME);
     }
   }
 
-  // FIX #9: partículas
-  updateParticles(dt,t);
+  // Partículas por domo
+  domes.forEach(d=>updateParticles(d,dt,t));
   updateBurst(dt,t);
 
   // Mãos
@@ -605,7 +558,7 @@ renderer.setAnimationLoop((ts,frame)=>{
       if(src.hand){
         const side=src.handedness==='left'?'left':'right';
         const joints=side==='left'?handJointsL:handJointsR;
-        updateHands(frame,joints,src.hand,xrRef,side);
+        updateHands(frame,joints,src.hand,xrRef,side,t);
       }
     }
   }

@@ -315,15 +315,28 @@ function ensureAudio(){
   if(audioCtx.state==='suspended')audioCtx.resume();
 }
 function playMetalWobble(vol=1.0){
-  ensureAudio();const ac=audioCtx,now=ac.currentTime,dur=4.0;
-  const lfo=ac.createOscillator(),lfoG=ac.createGain();
-  lfo.frequency.value=3.8;lfoG.gain.value=22;lfo.connect(lfoG);lfo.start(now);lfo.stop(now+dur);
-  [[72,1.0],[144,.55],[216,.32],[340,.18],[560,.08]].forEach(([f,g])=>{
+  ensureAudio();const ac=audioCtx,now=ac.currentTime;
+  // Reverb simulado: dois delays em paralelo
+  const rev1=ac.createDelay(2);rev1.delayTime.value=0.09;
+  const rev2=ac.createDelay(2);rev2.delayTime.value=0.14;
+  const fb1=ac.createGain();fb1.gain.value=0.38;
+  const fb2=ac.createGain();fb2.gain.value=0.30;
+  const wet=ac.createGain();wet.gain.value=0.45;
+  rev1.connect(fb1);fb1.connect(rev1);rev1.connect(wet);
+  rev2.connect(fb2);fb2.connect(rev2);rev2.connect(wet);
+  wet.connect(ac.destination);
+  // Harmônicos de alumínio — sines ligeiramente desafinadas para beating natural
+  // [freq_base, amplitude, detune_ratio, decay_s]
+  [[82,1.00,1.0031,5.0],[164,.42,1.0018,4.2],[246,.20,0.9985,3.5],
+   [330,.10,1.0024,3.0],[490,.05,0.9973,2.5]].forEach(([f,g,dt,dur])=>{
     const o=ac.createOscillator(),gn=ac.createGain();
-    o.type='sawtooth';o.frequency.value=f;lfoG.connect(o.frequency);
-    gn.gain.setValueAtTime(0,now);gn.gain.linearRampToValueAtTime(vol*g*.35,now+.05);
-    gn.gain.exponentialRampToValueAtTime(.0001,now+dur);
-    o.connect(gn);gn.connect(ac.destination);o.start(now);o.stop(now+dur);
+    o.type='sine';o.frequency.value=f*dt;
+    // ataque suave (metal tocado, não percutido)
+    gn.gain.setValueAtTime(0,now);
+    gn.gain.linearRampToValueAtTime(vol*g*0.28,now+0.04);
+    gn.gain.setTargetAtTime(0,now+0.12,dur*0.38);
+    o.connect(gn);gn.connect(ac.destination);gn.connect(rev1);gn.connect(rev2);
+    o.start(now);o.stop(now+dur+1);
   });
 }
 

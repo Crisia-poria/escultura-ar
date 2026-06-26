@@ -116,7 +116,7 @@ const VERT=`
     vV=normalize(-mv.xyz);gl_Position=projectionMatrix*mv;
   }`;
 const FRAG=`
-  uniform float uTime,uTouch,uHue,uReveal,uWind;
+  uniform float uTime,uTouch,uHue,uHueBase,uReveal,uWind;
   varying vec3 vN,vV;varying vec2 vUv;varying float vDisp;
   void main(){
     if(uReveal<=0.)discard;
@@ -126,7 +126,7 @@ const FRAG=`
     float dt=uTime-uTouch,alive=step(dt,7.);
     float decay=max(0.,1.-dt*.14)*alive;
     float waveGlow=exp(-pow(vUv.y-dt*.30,2.)*14.)*decay;
-    float ph=rim*7.+vUv.y*3.-uTime*.28+vDisp*38.+uHue+waveGlow*2.;
+    float ph=rim*7.+vUv.y*3.-uTime*.28+vDisp*38.+uHue+uHueBase+waveGlow*2.;
     vec3 iri=vec3(.5+.32*cos(ph),.5+.32*cos(ph+2.09),.5+.32*cos(ph+4.19));
     float metalBase=pow(1.-vUv.y,2.)*uReveal*1.6;
     float metalPulse=(.5+.5*sin(uTime*1.1-vUv.y*5.))*pow(1.-vUv.y,1.2)*1.3;
@@ -171,12 +171,12 @@ const GEO=buildGeo(HEIGHT);
 const GEO2=buildGeo(HEIGHT2);
 const PCOUNT=100;
 
-function makeDome(geo=GEO,h=HEIGHT){
+function makeDome(geo=GEO,h=HEIGHT,hueBase=0){
   const mat=new THREE.ShaderMaterial({
     transparent:true,side:THREE.FrontSide,depthWrite:false,
     blending:THREE.CustomBlending,blendEquation:THREE.AddEquation,
     blendSrc:THREE.SrcAlphaFactor,blendDst:THREE.OneMinusSrcAlphaFactor,
-    uniforms:{uTime:{value:0},uTouch:{value:-99},uHue:{value:0},uReveal:{value:0},uWind:{value:0}},
+    uniforms:{uTime:{value:0},uTouch:{value:-99},uHue:{value:0},uHueBase:{value:hueBase},uReveal:{value:0},uWind:{value:0}},
     vertexShader:VERT,fragmentShader:FRAG
   });
   const haloMat=new THREE.ShaderMaterial({
@@ -236,7 +236,8 @@ function makeDome(geo=GEO,h=HEIGHT){
          locked:false,hue:0,h};
 }
 
-const domes=[makeDome(GEO,HEIGHT),makeDome(GEO2,HEIGHT2)];
+// dome 0: âmbar/dourado (hueBase=0) · dome 1: azul/violeta (hueBase=2.1)
+const domes=[makeDome(GEO,HEIGHT,0),makeDome(GEO2,HEIGHT2,2.1)];
 
 // ── Texto interno: "em processo..." (domo 0) ──────────────────
 const labelCanvas=document.createElement('canvas');
@@ -255,43 +256,67 @@ const labelMat=new THREE.MeshBasicMaterial({map:labelTex,transparent:true,depthW
 const label=new THREE.Mesh(new THREE.PlaneGeometry(0.55,0.14),labelMat);
 label.visible=false;scene.add(label);
 
-// ── Árvore crescendo (domo 1) ─────────────────────────────────
-function buildTree(){
-  const segs=[];
-  let ord=0;
+// ── Sistema de árvores (ambos os domos) ───────────────────────
+function buildTreeSegs(trunkLen,maxDepth,seed){
+  const segs=[];let ord=0;
   function branch(start,dir,len,depth){
-    if(depth<0||len<0.05)return;
+    if(depth<0||len<0.03)return;
     const end=start.clone().addScaledVector(dir,len);
     segs.push({ox:start.x,oy:start.y,oz:start.z,
                ex:end.x,ey:end.y,ez:end.z,depth,order:ord++});
     if(depth===0)return;
-    const count=depth>=4?3:2;
+    const count=depth>=maxDepth-1?3:2;
     for(let i=0;i<count;i++){
-      const angleY=(i/count)*Math.PI*2+(depth*1.1);
-      const tilt=0.38+Math.random()*0.18;
-      // eixo perpendicular ao dir para tilt
-      const perp=new THREE.Vector3(Math.sin(angleY),0,Math.cos(angleY)).normalize();
+      const angleY=(i/count)*Math.PI*2+(depth*1.3+seed);
+      const tilt=0.35+((seed*7+i*3+depth)%10)*0.025;
+      const perp=new THREE.Vector3(Math.sin(angleY),0,Math.cos(angleY));
       const newDir=dir.clone().multiplyScalar(Math.cos(tilt))
                       .addScaledVector(perp,Math.sin(tilt)).normalize();
-      branch(end,newDir,len*0.66,depth-1);
+      branch(end,newDir,len*0.65,depth-1);
     }
   }
-  branch(new THREE.Vector3(0,0,0),new THREE.Vector3(0,1,0),1.4,5);
+  branch(new THREE.Vector3(0,0,0),new THREE.Vector3(0,1,0),trunkLen,maxDepth);
   return segs;
 }
-const treeSegs=buildTree();
-const treeMats=[];
-const treeLines=treeSegs.map((s,i)=>{
-  const g=new THREE.BufferGeometry();
-  g.setAttribute('position',new THREE.Float32BufferAttribute([s.ox,s.oy,s.oz,s.ex,s.ey,s.ez],3));
-  const thick=Math.max(1,s.depth*0.6);
-  const m=new THREE.LineBasicMaterial({color:new THREE.Color().setHSL(0.28+s.depth*.04,0.7,0.4+s.depth*.06),transparent:true,opacity:0,linewidth:thick});
-  treeMats.push(m);
-  const l=new THREE.Line(g,m);
-  l.visible=false;scene.add(l);
-  return l;
-});
-let treeRevealTime=null; // set when dome 1 locks
+
+function makeForest(trunkLen,maxDepth,radius,baseHue,shrubCount){
+  const groups=[];
+  // árvore principal no centro
+  const mainSegs=buildTreeSegs(trunkLen,maxDepth,0);
+  // 5 arbustos em anel
+  const allGroups=[{segs:mainSegs,ox:0,oz:0,scale:1}];
+  for(let i=0;i<shrubCount;i++){
+    const a=(i/shrubCount)*Math.PI*2;
+    const r=radius*(0.45+i%2*0.15);
+    allGroups.push({
+      segs:buildTreeSegs(trunkLen*0.32,Math.max(2,maxDepth-2),i+1),
+      ox:Math.cos(a)*r, oz:Math.sin(a)*r, scale:0.32
+    });
+  }
+  const lines=[],mats=[];
+  allGroups.forEach(({segs,ox,oz})=>{
+    segs.forEach(s=>{
+      const g=new THREE.BufferGeometry();
+      g.setAttribute('position',new THREE.Float32BufferAttribute(
+        [s.ox+ox,s.oy,s.oz+oz, s.ex+ox,s.ey,s.ez+oz],3));
+      const hsl=baseHue+s.depth*0.03;
+      const m=new THREE.LineBasicMaterial({
+        color:new THREE.Color().setHSL(hsl,0.72,0.35+s.depth*0.07),
+        transparent:true,opacity:0});
+      const l=new THREE.Line(g,m);
+      l.visible=false;scene.add(l);
+      lines.push({line:l,mat:m,seg:s,totalSegs:segs.length});
+      mats.push(m);
+    });
+  });
+  return{lines,mats};
+}
+
+// dome 0: árvore pequena, verde-quente; dome 1: árvore grande, verde-azulado
+const forest0=makeForest(HEIGHT*0.28,4,MAX_RX*0.55,0.28,5);
+const forest1=makeForest(HEIGHT2*0.30,5,MAX_RX*0.58,0.40,5);
+const forests=[forest0,forest1];
+const forestRevealTimes=[null,null];
 
 // ── Pool de luz ───────────────────────────────────────────────
 const poolMat=new THREE.ShaderMaterial({
@@ -420,27 +445,39 @@ function ensureAudio(){
 }
 function playMetalWobble(vol=1.0){
   ensureAudio();const ac=audioCtx,now=ac.currentTime;
-  const rev1=ac.createDelay(3);rev1.delayTime.value=0.11;
-  const rev2=ac.createDelay(3);rev2.delayTime.value=0.17;
-  const fb1=ac.createGain();fb1.gain.value=0.42;
-  const fb2=ac.createGain();fb2.gain.value=0.35;
-  const wet=ac.createGain();wet.gain.value=0.52;
+  // reverb com tempo e feedback variáveis
+  const rv=0.08+Math.random()*0.16, fb=0.30+Math.random()*0.22;
+  const rev1=ac.createDelay(3);rev1.delayTime.value=rv;
+  const rev2=ac.createDelay(3);rev2.delayTime.value=rv*1.6+0.04;
+  const fb1=ac.createGain();fb1.gain.value=fb;
+  const fb2=ac.createGain();fb2.gain.value=fb*0.8;
+  const wet=ac.createGain();wet.gain.value=0.44+Math.random()*0.22;
   rev1.connect(fb1);fb1.connect(rev1);rev1.connect(wet);
   rev2.connect(fb2);fb2.connect(rev2);rev2.connect(wet);
   wet.connect(ac.destination);
-  [[38,1.00,7.0],[55,0.72,6.2],[81,0.45,5.4],[112,0.22,4.5],[167,0.10,3.8]].forEach(([f,g,dur])=>{
+  // conjunto de modos aleatório a cada toque (3 variantes)
+  const sets=[
+    [[28,1.00,8.5],[42,0.78,7.2],[63,0.52,6.0],[95,0.28,5.0],[148,0.12,4.2]],
+    [[38,1.00,7.0],[55,0.72,6.2],[81,0.45,5.4],[112,0.22,4.5],[167,0.10,3.8]],
+    [[52,1.00,6.5],[73,0.68,5.8],[108,0.40,5.0],[158,0.18,4.0],[223,0.08,3.2]],
+  ];
+  const chosen=sets[Math.floor(Math.random()*sets.length)];
+  chosen.forEach(([f,g,dur])=>{
+    const detune=1.001+Math.random()*0.006;
     const o1=ac.createOscillator(),o2=ac.createOscillator();
     const lfo=ac.createOscillator(),lfoG=ac.createGain();
-    lfo.frequency.value=0.25+Math.random()*0.6;lfoG.gain.value=f*0.018;
+    lfo.frequency.value=0.12+Math.random()*0.9;
+    lfoG.gain.value=f*(0.010+Math.random()*0.018);
     lfo.connect(lfoG);lfoG.connect(o1.frequency);lfoG.connect(o2.frequency);
-    lfo.start(now);lfo.stop(now+dur);
+    lfo.start(now);lfo.stop(now+dur+1);
     o1.type='sine';o2.type='sine';
-    o1.frequency.value=f;o2.frequency.value=f*(1.002+Math.random()*.004);
+    o1.frequency.value=f;o2.frequency.value=f*detune;
+    const attack=0.06+Math.random()*0.18;
     const gn=ac.createGain();
     gn.gain.setValueAtTime(0,now);
-    gn.gain.linearRampToValueAtTime(vol*g*0.18,now+0.12);
-    gn.gain.setTargetAtTime(vol*g*0.12,now+0.4,dur*0.28);
-    gn.gain.setTargetAtTime(0,now+dur*0.45,dur*0.42);
+    gn.gain.linearRampToValueAtTime(vol*g*0.18,now+attack);
+    gn.gain.setTargetAtTime(vol*g*0.10,now+attack+0.3,dur*0.22+Math.random()*dur*0.12);
+    gn.gain.setTargetAtTime(0,now+dur*0.40+Math.random()*dur*0.15,dur*0.38+Math.random()*0.5);
     o1.connect(gn);o2.connect(gn);
     gn.connect(ac.destination);gn.connect(rev1);gn.connect(rev2);
     o1.start(now);o1.stop(now+dur+2);o2.start(now);o2.stop(now+dur+2);
@@ -478,20 +515,19 @@ function lockDome(idx,px,pz){
   scanAccum=0;
   lockedCount++;
   if(idx===0){
-    // posiciona texto dentro do domo 0
-    label.position.set(px, HEIGHT*0.35, pz);
+    label.position.set(px,HEIGHT*0.35,pz);
     label.visible=true;
   }
-  if(idx===1){
-    // posiciona árvore dentro do domo 1
-    treeLines.forEach((l,i)=>{
-      const s=treeSegs[i];
-      l.geometry.setAttribute('position',new THREE.Float32BufferAttribute(
-        [px+s.ox,s.oy,pz+s.oz, px+s.ex,s.ey,pz+s.ez],3));
-      l.visible=true;
-    });
-    treeRevealTime=clock.getElapsedTime();
-  }
+  // posiciona e activa floresta do domo idx
+  const f=forests[idx];
+  f.lines.forEach(({line,seg})=>{
+    const pos=line.geometry.attributes.position;
+    const arr=pos.array;
+    arr[0]+=px;arr[2]+=pz;arr[3]+=px;arr[5]+=pz;
+    pos.needsUpdate=true;
+    line.visible=true;
+  });
+  forestRevealTimes[idx]=clock.getElapsedTime();
   if(lockedCount<2){
     scanning=true;
     status('Agora olhe para a segunda escultura e aguarde 30s…');
@@ -529,8 +565,10 @@ function resetAll(){
   });
   pool.visible=false;poolMat.uniforms.uFill.value=0;
   label.visible=false;labelMat.opacity=0;
-  treeLines.forEach(l=>{l.visible=false;});treeMats.forEach(m=>{m.opacity=0;});
-  treeRevealTime=null;
+  forests.forEach((f,i)=>{
+    f.lines.forEach(({line,mat})=>{line.visible=false;mat.opacity=0;});
+    forestRevealTimes[i]=null;
+  });
   prevD.left=[2,2];prevD.right=[2,2];
 }
 
@@ -629,16 +667,18 @@ renderer.setAnimationLoop((ts,frame)=>{
     label.rotation.y=Math.sin(t*0.22)*0.08;
   }
 
-  // Árvore crescendo — revela ramos em sequência
-  if(treeRevealTime!==null){
-    const elapsed=t-treeRevealTime;
-    const totalDur=18; // segundos para árvore completa
-    treeSegs.forEach((s,i)=>{
-      const revAt=(s.order/treeSegs.length)*totalDur;
-      const fadeIn=Math.min(1,Math.max(0,(elapsed-revAt)*2));
-      treeMats[i].opacity=fadeIn*(.7-s.depth*.06);
+  // Florestas crescendo — revela ramos lentamente
+  forests.forEach((f,fi)=>{
+    const rt=forestRevealTimes[fi];
+    if(rt===null)return;
+    const elapsed=t-rt;
+    const totalDur=28;
+    f.lines.forEach(({mat,seg,totalSegs})=>{
+      const revAt=(seg.order/totalSegs)*totalDur;
+      const fadeIn=Math.min(1,Math.max(0,(elapsed-revAt)*0.8));
+      mat.opacity=fadeIn*(0.75-seg.depth*0.05);
     });
-  }
+  });
 
   // Partículas por domo
   domes.forEach(d=>updateParticles(d,dt,t));

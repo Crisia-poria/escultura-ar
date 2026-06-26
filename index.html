@@ -34,21 +34,25 @@
 import * as THREE from 'three';
 
 // ── Perfil ────────────────────────────────────────────────────
-// Perfil de DOMO: largo na base (t=0=chão), fecha no topo (t=1)
+// Perfil orgânico em domo: largo na base, fecha no topo, com irregularidades
 const PROFILE=[
-  [0.00,0.680,0.620],
-  [0.06,0.676,0.616],
-  [0.15,0.660,0.600],
-  [0.28,0.620,0.563],
-  [0.42,0.552,0.500],
-  [0.56,0.450,0.408],
-  [0.68,0.330,0.298],
-  [0.80,0.208,0.186],
-  [0.90,0.108,0.095],
-  [0.96,0.042,0.036],
-  [1.00,0.008,0.006],
+  [0.00,0.672,0.615],  // base no chão — abertura larga
+  [0.07,0.685,0.628],  // pequeno alargamento orgânico logo acima do chão
+  [0.15,0.668,0.610],
+  [0.23,0.692,0.635],  // lóbulo mais largo — forma irregular
+  [0.32,0.648,0.590],  // estrangulamento suave
+  [0.40,0.670,0.612],  // volta a alargar
+  [0.49,0.612,0.555],
+  [0.57,0.558,0.505],  // outro estrangulamento
+  [0.64,0.580,0.528],  // pequeno lóbulo
+  [0.71,0.490,0.442],
+  [0.78,0.368,0.330],
+  [0.86,0.228,0.202],
+  [0.93,0.108,0.092],
+  [0.97,0.040,0.032],
+  [1.00,0.007,0.005],
 ];
-const HEIGHT=0.80, SLICES=60, STACKS=80, MAX_RX=0.680, MAX_RZ=0.620;
+const HEIGHT=0.82, SLICES=60, STACKS=80, MAX_RX=0.692, MAX_RZ=0.635;
 
 function interp(t){
   for(let i=0;i<PROFILE.length-1;i++){
@@ -358,17 +362,6 @@ function ellD(p){
   return Math.sqrt(lx*lx+ly*ly+lz*lz);
 }
 
-// FIX #7: pinch detection for reposition gesture
-function checkPinch(frame,hand,ref){
-  const tt=hand.get('thumb-tip'),it=hand.get('index-finger-tip');
-  if(!tt||!it)return false;
-  const tp=frame.getJointPose(tt,ref),ip=frame.getJointPose(it,ref);
-  if(!tp||!ip)return false;
-  const dx=tp.transform.position.x-ip.transform.position.x;
-  const dy=tp.transform.position.y-ip.transform.position.y;
-  const dz=tp.transform.position.z-ip.transform.position.z;
-  return Math.sqrt(dx*dx+dy*dy+dz*dz)<0.032;
-}
 
 function updateHands(frame,joints,hand,ref,side){
   JNAMES.forEach((name,i)=>{
@@ -392,7 +385,6 @@ function updateHands(frame,joints,hand,ref,side){
 // ── Estado ────────────────────────────────────────────────────
 let xrSess=null,xrRef=null,xrViewerSpace=null,hitSrc=null;
 let scanning=false,locked=false,scanAccum=0,needsPlace=false;
-let pinchTimer=0;
 let windPhase=0; // FIX #2: independent wind phase
 const clock=new THREE.Clock();
 let lastT=0;
@@ -450,7 +442,7 @@ function setupSession(session){
 
   session.addEventListener('end',()=>{
     xrSess=null;xrRef=null;xrViewerSpace=null;hitSrc=null;
-    scanning=false;locked=false;needsPlace=false;scanAccum=0;pinchTimer=0;
+    scanning=false;locked=false;needsPlace=false;scanAccum=0;
     mat.uniforms.uReveal.value=0;
     haloMat.uniforms.uReveal.value=0;poolMat.uniforms.uFill.value=0;
     glowMat.uniforms.uReveal.value=0;causticMat.uniforms.uReveal.value=0;
@@ -529,9 +521,9 @@ renderer.setAnimationLoop((ts,frame)=>{
         const hx=p.transform.position.x,hz=p.transform.position.z;
         pool.position.set(hx,.003,hz);
         scanAccum+=dt;
-        poolMat.uniforms.uFill.value=Math.min(1,scanAccum/3);
+        poolMat.uniforms.uFill.value=Math.min(1,scanAccum/5);
         pool.scale.setScalar(1+.04*Math.sin(t*4));
-        if(scanAccum>=3){lockBubble(hx,hz);}
+        if(scanAccum>=5){lockBubble(hx,hz);}
       }
     } else {
       scanAccum=Math.max(0,scanAccum-dt*3);
@@ -542,37 +534,15 @@ renderer.setAnimationLoop((ts,frame)=>{
   // FIX #9: partículas
   updateParticles(dt,t);
 
-  // Mãos + FIX #7: pinch para reposicionar
+  // Mãos
   const sess=renderer.xr.getSession();
-  let pinching=false;
   if(sess){
     for(const src of sess.inputSources){
       if(src.hand){
         const side=src.handedness==='left'?'left':'right';
         const joints=side==='left'?handJointsL:handJointsR;
         updateHands(frame,joints,src.hand,xrRef,side);
-        if(locked&&checkPinch(frame,src.hand,xrRef))pinching=true;
       }
-    }
-  }
-
-  // FIX #7: ativar reposicionamento por beliscão 1s
-  if(locked){
-    if(pinching){
-      pinchTimer+=dt;
-      if(pinchTimer>=1.0){
-        locked=false;scanning=true;scanAccum=0;
-        pool.visible=true;
-        // re-request hit-test source if needed
-        if(!hitSrc&&xrViewerSpace&&xrSess){
-          xrSess.requestHitTestSource({space:xrViewerSpace})
-            .then(hs=>{hitSrc=hs;}).catch(()=>{});
-        }
-        status('Mova o cursor · aguarde 3s para fixar');
-        pinchTimer=0;
-      }
-    } else {
-      pinchTimer=Math.max(0,pinchTimer-dt*2);
     }
   }
 

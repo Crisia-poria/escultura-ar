@@ -290,15 +290,20 @@ function setupSession(session){
     .then(()=>session.requestReferenceSpace('local-floor'))
     .then(ref=>{
       xrRef=ref;
+      // Bolha aparece imediatamente à frente do usuário
+      mesh.position.set(0,0,-1.5);
+      halo.position.set(0,.004,-1.5);
+      locked=true;scanning=true;scanAccum=0;depthScanTime=0;
+      mat.uniforms.uReveal.value=0;haloMat.uniforms.uReveal.value=0;
+      lastT=clock.getElapsedTime();
+      tapEl.classList.add('hidden');renderer.domElement.style.display='block';
+      status('Aponte para a escultura e aguarde…');
+      // Tenta hit-test para reposicionar
       return session.requestReferenceSpace('viewer')
         .then(vs=>session.requestHitTestSource({space:vs}))
         .catch(()=>null);
     }).then(hs=>{
-      hitSrc=hs;scanning=true;locked=false;scanAccum=0;depthScanTime=0;
-      mat.uniforms.uReveal.value=0;haloMat.uniforms.uReveal.value=0;
-      lastT=clock.getElapsedTime();
-      tapEl.classList.add('hidden');renderer.domElement.style.display='block';
-      status('Procurando escultura…');
+      hitSrc=hs;
     }).catch(e=>status('Erro: '+e.message));
 
   session.addEventListener('end',()=>{
@@ -336,50 +341,34 @@ renderer.setAnimationLoop((ts,frame)=>{
   if(frame&&xrRef){
     const viewerPose=frame.getViewerPose(xrRef);
 
-    if(!locked){
-      depthScanTime+=dt;
-
-      // ── Depth sensing: detecta escultura automaticamente ──
-      if(depthScanTime<5){
-        const found=scanDepth(frame,viewerPose);
-        if(found){
-          lock(found.x,0,found.z);
-          status('Escultura encontrada ✓');
-          return;
-        }
-        if(hasDepthSensing){
-          status(`Procurando escultura… aponte para ela (${Math.ceil(5-depthScanTime)}s)`);
-        } else {
-          status('Depth sensor indisponível — varredura manual');
-        }
-      }
-
-      // ── Hit-test fallback após 5s sem depth ou sem sensor ──
-      if((depthScanTime>=5||!hasDepthSensing)&&hitSrc){
-        const hits=frame.getHitTestResults(hitSrc);
-        if(hits.length>0){
-          const p=hits[0].getPose(xrRef);
-          if(p){
-            ring.position.set(p.transform.position.x,p.transform.position.y+.003,p.transform.position.z);
-            scanAccum+=dt;
-            ringMat.opacity=(0.4+Math.min(scanAccum/1.5,.6))*(.7+.3*Math.sin(t*6));
-            ring.scale.setScalar(1+.06*Math.sin(t*5));
-            if(!hasDepthSensing) status('Aponte para a escultura e aguarde…');
-            if(scanAccum>=1.5){
-              lock(p.transform.position.x,p.transform.position.y,p.transform.position.z);
-            }
-          }
-        } else {
-          scanAccum=Math.max(0,scanAccum-dt*2);
-          ringMat.opacity=Math.max(0,ringMat.opacity-dt*2);
-        }
-      }
-    }
-
+    // ── Revela bolha sempre que locked ────────────────────────
     if(locked){
-      ringMat.opacity=Math.max(0,ringMat.opacity-dt*3);
       const rev=Math.min(1,mat.uniforms.uReveal.value+dt*.4);
       mat.uniforms.uReveal.value=rev;haloMat.uniforms.uReveal.value=rev;
+    }
+
+    // ── Hit-test: reposiciona bolha enquanto scanning=true ──
+    if(scanning&&hitSrc){
+      const hits=frame.getHitTestResults(hitSrc);
+      if(hits.length>0){
+        const p=hits[0].getPose(xrRef);
+        if(p){
+          ring.position.set(p.transform.position.x,p.transform.position.y+.003,p.transform.position.z);
+          scanAccum+=dt;
+          ringMat.opacity=(0.4+Math.min(scanAccum/2,.6))*(.7+.3*Math.sin(t*6));
+          ring.scale.setScalar(1+.06*Math.sin(t*5));
+          // Após 2s estável sobre uma superfície → move bolha para lá
+          if(scanAccum>=2){
+            mesh.position.set(p.transform.position.x,p.transform.position.y,p.transform.position.z);
+            halo.position.set(p.transform.position.x,p.transform.position.y+.004,p.transform.position.z);
+            scanning=false;ringMat.opacity=0;
+            status('');
+          }
+        }
+      } else {
+        scanAccum=Math.max(0,scanAccum-dt*3);
+        ringMat.opacity=Math.max(0,ringMat.opacity-dt*2);
+      }
     }
 
     const sess=renderer.xr.getSession();

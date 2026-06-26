@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-  <title>Bolha digital sob metal</title>
+  <title>Metal e Bolha</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
@@ -43,33 +43,35 @@
 <script type="module">
 import * as THREE from 'three';
 
-// ── Perfil orgânico ───────────────────────────────────────────
-// rx = largura lateral, rz = altura acima do chão (inflado)
+// ── Perfil orgânico — forma irregular, não simétrica ──────────
+// [t, rx_lateral, rz_vertical] — blob achatado com lobos irregulares
 const PROFILE=[
-  [0.00,0.025,0.020],
-  [0.03,0.080,0.120],
-  [0.07,0.135,0.220],
-  [0.13,0.168,0.310],  // bulbo inferior largo
-  [0.19,0.152,0.275],
-  [0.25,0.102,0.165],  // cintura estreita
-  [0.30,0.128,0.210],
-  [0.36,0.178,0.320],  // quadril
-  [0.42,0.192,0.345],  // ponto mais largo
-  [0.47,0.165,0.290],
-  [0.52,0.108,0.175],  // cintura
-  [0.57,0.145,0.245],
-  [0.63,0.188,0.335],  // peito
-  [0.68,0.195,0.355],  // seção superior larga
-  [0.73,0.170,0.300],
-  [0.77,0.142,0.248],
-  [0.82,0.175,0.308],
-  [0.87,0.188,0.335],  // ombros
-  [0.91,0.155,0.268],
-  [0.95,0.105,0.178],
-  [0.98,0.062,0.098],
-  [1.00,0.025,0.025],
+  [0.00, 0.010, 0.008],
+  [0.02, 0.048, 0.065],
+  [0.05, 0.110, 0.160],
+  [0.09, 0.185, 0.260],  // primeiro lóbulo largo
+  [0.14, 0.210, 0.295],
+  [0.18, 0.175, 0.235],  // estrangulamento
+  [0.23, 0.118, 0.150],  // cintura apertada
+  [0.28, 0.162, 0.200],
+  [0.33, 0.228, 0.310],  // barriga principal
+  [0.39, 0.255, 0.360],  // mais largo de todos
+  [0.44, 0.240, 0.335],
+  [0.49, 0.185, 0.250],
+  [0.53, 0.130, 0.165],  // cintura média
+  [0.58, 0.195, 0.255],
+  [0.63, 0.248, 0.330],  // lóbulo superior
+  [0.68, 0.265, 0.350],  // quase tão largo quanto o central
+  [0.73, 0.228, 0.305],
+  [0.78, 0.175, 0.228],
+  [0.83, 0.215, 0.280],  // pequeno lóbulo tardio
+  [0.88, 0.195, 0.255],
+  [0.92, 0.140, 0.182],
+  [0.96, 0.078, 0.098],
+  [0.99, 0.028, 0.032],
+  [1.00, 0.008, 0.006],
 ];
-const HEIGHT=0.70,SLICES=64,STACKS=96;
+const HEIGHT=0.90, SLICES=80, STACKS=128;
 
 function interp(t){
   for(let i=0;i<PROFILE.length-1;i++){
@@ -82,28 +84,41 @@ function interp(t){
 function buildGeo(){
   const pos=[],nor=[],uv=[],idx=[];
   for(let i=0;i<=STACKS;i++){
-    const t=i/STACKS,y=(t-0.5)*HEIGHT,[rx,rz]=interp(t);
-    const e=0.005,[rxU,rzU]=interp(Math.min(t+e,1)),[rxD,rzD]=interp(Math.max(t-e,0));
-    const drx=(rxU-rxD)/(2*e*HEIGHT),drz=(rzU-rzD)/(2*e*HEIGHT);
+    const t=i/STACKS;
+    const [rx,rz]=interp(t);
+    const e=0.004;
+    const [rxU,rzU]=interp(Math.min(t+e,1));
+    const [rxD,rzD]=interp(Math.max(t-e,0));
+    const drx=(rxU-rxD)/(2*e*HEIGHT), drz=(rzU-rzD)/(2*e*HEIGHT);
+
     for(let j=0;j<=SLICES;j++){
-      const a=2*Math.PI*j/SLICES,ca=Math.cos(a),sa=Math.sin(a);
-      pos.push(rx*ca,rz*sa,-(t-0.5)*HEIGHT);
+      const a=2*Math.PI*j/SLICES, ca=Math.cos(a), sa=Math.sin(a);
+
+      // Perturbação orgânica — ondas de frequências diferentes no espaço UV
+      const bump = Math.sin(a*2.3+t*7.1)*0.018
+                 + Math.sin(a*1.1-t*4.7)*0.012
+                 + Math.sin(a*3.7+t*2.3)*0.008;
+
+      const rxb=rx+bump, rzb=rz+bump*0.8;
+
+      pos.push(rxb*ca, rzb*sa, -(t-0.5)*HEIGHT);
+
       const[tx1,ty1,tz1]=[-rx*sa,0,rz*ca],[tx2,ty2,tz2]=[drx*ca,1,drz*sa];
-      let nx=ty1*tz2-tz1*ty2,ny=tz1*tx2-tx1*tz2,nz=tx1*ty2-ty1*tx2;
+      let nx=ty1*tz2-tz1*ty2, ny=tz1*tx2-tx1*tz2, nz=tx1*ty2-ty1*tx2;
       const nl=Math.sqrt(nx*nx+ny*ny+nz*nz)||1;
-      nor.push(nx/nl,nz/nl,-ny/nl);
-      uv.push(j/SLICES,t);
+      nor.push(nx/nl, nz/nl, -ny/nl);
+      uv.push(j/SLICES, t);
     }
   }
   for(let i=0;i<STACKS;i++)for(let j=0;j<SLICES;j++){
-    const a=i*(SLICES+1)+j,b=a+SLICES+1;
+    const a=i*(SLICES+1)+j, b=a+SLICES+1;
     idx.push(a,b,a+1,b,b+1,a+1);
   }
   const g=new THREE.BufferGeometry();
   g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
   g.setAttribute('normal',new THREE.Float32BufferAttribute(nor,3));
   g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));
-  g.setIndex(idx);return g;
+  g.setIndex(idx); return g;
 }
 
 // ── Renderer ──────────────────────────────────────────────────
@@ -117,50 +132,49 @@ document.body.insertBefore(renderer.domElement,document.getElementById('tap'));
 const scene=new THREE.Scene();
 const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,0.01,20);
 
-// ── Shader iridescente + glow radiante ───────────────────────
+// ── Shader: bolha de sabão iridescente — NÃO branca ──────────
 const mat=new THREE.ShaderMaterial({
   transparent:true,
-  blending:THREE.AdditiveBlending,
   side:THREE.DoubleSide,
   depthWrite:false,
+  blending:THREE.CustomBlending,
+  blendEquation:THREE.AddEquation,
+  blendSrc:THREE.SrcAlphaFactor,
+  blendDst:THREE.OneMinusSrcAlphaFactor,
   uniforms:{uTime:{value:0},uTouch:{value:-99},uHue:{value:0},uReveal:{value:0},uHand:{value:-1}},
   vertexShader:`
     uniform float uTime,uTouch,uReveal,uHand;
     varying vec3 vN,vV;varying vec2 vUv;varying float vDisp;
 
-    // Noise simples (hash + smooth)
-    float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5);}
-    float noise(vec2 p){
-      vec2 i=floor(p),f=fract(p);
-      f=f*f*(3.-2.*f);
-      float a=hash(i),b=hash(i+vec2(1,0)),c=hash(i+vec2(0,1)),d=hash(i+vec2(1,1));
-      return mix(mix(a,b,f.x),mix(c,d,f.x),f.y);
+    float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5);}
+    float smn(vec2 p){
+      vec2 i=floor(p),f=fract(p)*fract(p)*(3.-2.*fract(p));
+      return mix(mix(h21(i),h21(i+vec2(1,0)),f.x),mix(h21(i+vec2(0,1)),h21(i+vec2(1,1)),f.x),f.y);
     }
 
     void main(){
       vUv=uv;
-
       float dt=uTime-uTouch;
       float alive=step(dt,5.);
-      // Onda de toque: propaga devagar pela superfície (velocidade ~0.4 uv/s)
-      float waveFront=dt*.38;
-      float distFromFront=abs(vUv.y-waveFront);
-      float touchWave=exp(-distFromFront*distFromFront*18.)*alive*
-                      sin(dt*3.5-vUv.y*9.)*max(0.,1.-dt*.22);
+      // Onda de toque: propaga lentamente pela membrana
+      float waveFront=dt*.36;
+      float distW=abs(vUv.y-waveFront);
+      float touchWave=exp(-distW*distW*20.)*alive
+                     *sin(dt*3.-vUv.y*7.)*max(0.,1.-dt*.18);
 
-      // Respiração lenta permanente
-      float breathe=sin(uTime*.55+vUv.y*2.2)*0.008
-                   +sin(uTime*.31+vUv.x*3.1)*0.005;
+      // Respiração lenta
+      float breathe=sin(uTime*.5+vUv.y*2.0)*0.010
+                   +sin(uTime*.29+vUv.x*2.8)*0.006;
 
-      // Tensão de mão: superfície atrai suavemente
+      // Mão: atração suave
       float hs=max(0.,1.-uHand*2.5)*step(0.,uHand)*step(uHand,.4);
-      float handPull=hs*0.018*sin(uTime*2.8+vUv.y*5.);
+      float handPull=hs*0.016*sin(uTime*2.5+vUv.y*4.);
 
-      // Noise líquido lento sempre presente
-      float n=noise(vUv*3.+vec2(uTime*.18,uTime*.11));
-      float liqNoise=(n-.5)*0.012;
+      // Noise líquido permanente
+      float n=smn(vUv*2.8+vec2(uTime*.14,uTime*.09));
+      float liq=(n-.5)*.014;
 
-      float disp=(touchWave*0.032+breathe+handPull+liqNoise)*uReveal;
+      float disp=(touchWave*.028+breathe+handPull+liq)*uReveal;
       vDisp=disp;
 
       vec3 displaced=position+normal*disp;
@@ -174,99 +188,96 @@ const mat=new THREE.ShaderMaterial({
     varying vec3 vN,vV;varying vec2 vUv;varying float vDisp;
     void main(){
       if(uReveal<=0.)discard;
-      vec3 N=normalize(vN);vec3 V=normalize(vV);
+      vec3 N=normalize(vN); vec3 V=normalize(vV);
       float NdotV=abs(dot(N,V));
-      float rim=pow(1.-NdotV,1.2);
-      float inner=pow(NdotV,1.5);
+      float rim=pow(1.-NdotV,1.8);   // brilha nas bordas
+      float core=pow(NdotV,2.5);     // levemente visível no centro
 
-      float dt=uTime-uTouch,alive=step(dt,5.);
-      float decay=max(0.,1.-dt*.28)*alive;
+      float dt=uTime-uTouch, alive=step(dt,5.);
+      float decay=max(0.,1.-dt*.2)*alive;
       float hs=max(0.,1.-uHand*2.5)*step(0.,uHand)*step(uHand,.4);
 
-      // Shift de cor na frente da onda de toque
-      float waveFront=dt*.38;
-      float waveGlow=exp(-abs(vUv.y-waveFront)*abs(vUv.y-waveFront)*12.)*decay;
+      // Onda de cor propaga com o toque
+      float waveFront=dt*.36;
+      float waveGlow=exp(-pow(vUv.y-waveFront,2.)*18.)*decay;
 
-      float ph=rim*7.+vUv.y*2.8-uTime*.45+vDisp*40.+decay*3.+uHue+waveGlow*2.;
-      vec3 iri=vec3(.5+.5*cos(ph),.5+.5*cos(ph+2.094),.5+.5*cos(ph+4.189));
+      // Iridescência: interferência de filme fino
+      // Fase varia com ângulo de visão + posição UV + tempo lento
+      float ph=rim*9.+vUv.y*2.2-uTime*.38+vDisp*55.+uHue+waveGlow*3.;
+      // Separação de fases ampla → cores saturadas, nunca branco
+      vec3 iri=vec3(
+        .5+.5*cos(ph),
+        .5+.5*cos(ph+2.42),  // verde-azul
+        .5+.5*cos(ph+4.71)   // violeta
+      );
 
-      float pulse=.5+.5*sin(uTime*1.8);
-      float breathe=.5+.5*sin(uTime*.6+vUv.y*3.);
+      float pulse=.5+.5*sin(uTime*1.5);
 
-      vec3 innerLight=vec3(.55,.82,1.)*inner*(0.5+0.5*breathe)*(1.+decay*1.2+hs*1.2);
-      vec3 waveLight=iri*waveGlow*1.5;
-      vec3 rimCol=iri*(0.6+rim*.9+pulse*rim*.5+decay*.6+hs*.7);
+      // Toque: flash de cor na frente da onda
+      vec3 waveCol=iri*waveGlow*2.2;
 
-      vec3 col=(innerLight+rimCol+waveLight)*uReveal;
-      float a=(rim*.8+inner*.5+pulse*rim*.3+decay*.4+hs*.4+waveGlow*.3)*uReveal;
-      gl_FragColor=vec4(col,clamp(a,0.,1.));
+      // Mão: shimmer
+      vec3 handCol=iri*hs*.9*(.5+.5*sin(uTime*4.+vUv.y*8.));
+
+      // Composição: dominantemente iridescente nas bordas
+      vec3 col=iri*(rim*.9+pulse*rim*.3+decay*.5)
+              +waveCol+handCol
+              +vec3(.05,.14,.22)*core*.4; // toque azul-escuro no centro
+
+      // Alpha: bolha de sabão — quase invisível no centro, visível nas bordas
+      float a=(rim*.75+core*.08+waveGlow*.4+hs*.3+pulse*rim*.2)*uReveal;
+
+      gl_FragColor=vec4(col, clamp(a,0.,.88));
     }`
 });
 
-// ── Som de alumínio (Web Audio) ───────────────────────────────
+// ── Som: chapa de alumínio — osciladores graves + ruído de chacoalho ──
 let audioCtx=null;
 function playMetal(intensity=1.0){
-  if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+  if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();
   if(audioCtx.state==='suspended') audioCtx.resume();
-  const ac=audioCtx;
-  const now=ac.currentTime;
-  const dur=3.2;
+  const ac=audioCtx, now=ac.currentTime;
 
-  // Ruído branco filtrado → textura de chacoalhar/vibrar chapa de alumínio
-  const bufSize=ac.sampleRate*dur;
+  // Ressonância fundamental de alumínio: harmônicos graves
+  [[195,1.0],[390,0.55],[585,0.28],[1050,0.12]].forEach(([f,g])=>{
+    const osc=ac.createOscillator(), gain=ac.createGain();
+    osc.type='triangle'; osc.frequency.value=f;
+    gain.gain.setValueAtTime(intensity*g*0.38, now);
+    gain.gain.setValueAtTime(intensity*g*0.38, now+0.04);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now+2.8);
+    osc.connect(gain); gain.connect(ac.destination);
+    osc.start(now); osc.stop(now+2.8);
+  });
+
+  // Textura de chacoalho: ruído em banda média-baixa
+  const bufSize=Math.floor(ac.sampleRate*0.6);
   const buf=ac.createBuffer(1,bufSize,ac.sampleRate);
   const data=buf.getChannelData(0);
-  // Ruído com pequenas rajadas irregulares (simula tremor de chapa)
   for(let i=0;i<bufSize;i++){
-    const jitter=Math.random()<0.004?Math.random()*6:1; // picos de chocalhar
-    data[i]=(Math.random()*2-1)*jitter;
+    // Pequenas rajadas irregulares simulando o tremor da chapa
+    const burst=Math.random()<0.006?(Math.random()*4+1):1;
+    data[i]=(Math.random()*2-1)*burst;
   }
-  const src=ac.createBufferSource();
-  src.buffer=buf;
-
-  // Filtros em cascata: frequências graves/médias do alumínio (200-700Hz)
-  const f1=ac.createBiquadFilter();
-  f1.type='bandpass'; f1.frequency.value=280; f1.Q.value=3;
-  const f2=ac.createBiquadFilter();
-  f2.type='bandpass'; f2.frequency.value=520; f2.Q.value=5;
-  const f3=ac.createBiquadFilter();
-  f3.type='bandpass'; f3.frequency.value=1100; f3.Q.value=8;
-  const fHigh=ac.createBiquadFilter();
-  fHigh.type='highshelf'; fHigh.frequency.value=3000; fHigh.gain.value=-18; // corta agudos
-
-  // Reverb simples via delay feedback
-  const delay=ac.createDelay(0.4);
-  delay.delayTime.value=0.07;
-  const feedback=ac.createGain();
-  feedback.gain.value=0.45;
-  const wet=ac.createGain();
-  wet.gain.value=0.35;
-
-  const master=ac.createGain();
-  master.gain.setValueAtTime(intensity*0.55,now);
-  master.gain.setValueAtTime(intensity*0.55,now+0.05);
-  master.gain.exponentialRampToValueAtTime(0.001,now+dur);
-
-  // Cadeia: src → filtros → master → destino + loop de reverb
-  src.connect(f1); f1.connect(f2); f2.connect(f3); f3.connect(fHigh);
-  fHigh.connect(master);
-  fHigh.connect(wet); wet.connect(delay); delay.connect(feedback); feedback.connect(delay);
-  delay.connect(master);
-  master.connect(ac.destination);
-
-  src.start(now); src.stop(now+dur);
+  const nSrc=ac.createBufferSource(); nSrc.buffer=buf;
+  const bp=ac.createBiquadFilter();
+  bp.type='bandpass'; bp.frequency.value=350; bp.Q.value=2.5;
+  const nGain=ac.createGain();
+  nGain.gain.setValueAtTime(intensity*0.7, now);
+  nGain.gain.exponentialRampToValueAtTime(0.0001, now+0.6);
+  nSrc.connect(bp); bp.connect(nGain); nGain.connect(ac.destination);
+  nSrc.start(now); nSrc.stop(now+0.6);
 }
 
 const mesh=new THREE.Mesh(buildGeo(),mat);
 scene.add(mesh);
 
-// ── Anel de varredura ─────────────────────────────────────────
+// ── Anel de varredura (fallback visual) ───────────────────────
 const ringMat=new THREE.MeshBasicMaterial({color:0x88ccff,transparent:true,opacity:0,side:THREE.DoubleSide});
 const ring=new THREE.Mesh(new THREE.RingGeometry(0.18,0.22,64),ringMat);
 ring.rotation.x=-Math.PI/2;
 scene.add(ring);
 
-// ── Joints das mãos (esferas) ─────────────────────────────────
+// ── Joints das mãos ───────────────────────────────────────────
 const JOINT_NAMES=[
   'wrist',
   'thumb-metacarpal','thumb-phalanx-proximal','thumb-phalanx-distal','thumb-tip',
@@ -275,19 +286,25 @@ const JOINT_NAMES=[
   'ring-finger-metacarpal','ring-finger-phalanx-proximal','ring-finger-phalanx-intermediate','ring-finger-phalanx-distal','ring-finger-tip',
   'pinky-finger-metacarpal','pinky-finger-phalanx-proximal','pinky-finger-phalanx-intermediate','pinky-finger-phalanx-distal','pinky-finger-tip',
 ];
-const handMat=new THREE.MeshBasicMaterial({color:0xaaddff,transparent:true,opacity:0.55});
+const handMat=new THREE.MeshBasicMaterial({color:0xaaddff,transparent:true,opacity:0.45});
 const jointGeo=new THREE.SphereGeometry(0.008,8,8);
 
 function makeHandJoints(){
   return JOINT_NAMES.map(()=>{
     const s=new THREE.Mesh(jointGeo,handMat);
-    s.visible=false;
-    scene.add(s);
-    return s;
+    s.visible=false; scene.add(s); return s;
   });
 }
 const handJointsL=makeHandJoints();
 const handJointsR=makeHandJoints();
+
+// ── Pré-carrega imagem alvo para image tracking ───────────────
+let sculptureTarget=null;
+fetch('escultura-mask.png')
+  .then(r=>r.blob())
+  .then(b=>createImageBitmap(b))
+  .then(bm=>{sculptureTarget=bm;})
+  .catch(()=>{});
 
 // ── Estado AR ─────────────────────────────────────────────────
 let xrSess=null,xrRef=null,hitSrc=null;
@@ -297,7 +314,6 @@ let hue=0,lastT=0,handWasInside=false;
 
 const tapEl=document.getElementById('tap');
 const errEl=document.getElementById('err');
-
 function showErr(msg){errEl.innerHTML=msg;errEl.style.display='block';}
 
 function updateHandJoints(frame,joints,hand,ref){
@@ -310,9 +326,8 @@ function updateHandJoints(frame,joints,hand,ref){
     const p=pose.transform.position;
     joints[i].position.set(p.x,p.y,p.z);
     joints[i].visible=true;
-    // distância XZ ao centro da bolha
     if(locked){
-      const dx=p.x-mesh.position.x,dz=p.z-mesh.position.z;
+      const dx=p.x-mesh.position.x, dz=p.z-mesh.position.z;
       const d=Math.sqrt(dx*dx+dz*dz);
       if(minD<0||d<minD)minD=d;
     }
@@ -332,7 +347,7 @@ function setupSession(session){
         .catch(()=>null);
     }).then(hs=>{
       hitSrc=hs;
-      scanning=true;locked=false;scanAccum=0;
+      scanning=true; locked=false; scanAccum=0;
       mat.uniforms.uReveal.value=0;
       lastT=clock.getElapsedTime();
       tapEl.classList.add('hidden');
@@ -340,8 +355,8 @@ function setupSession(session){
     }).catch(e=>showErr(e.message));
 
   session.addEventListener('end',()=>{
-    xrSess=null;xrRef=null;hitSrc=null;
-    scanning=false;locked=false;scanAccum=0;
+    xrSess=null; xrRef=null; hitSrc=null;
+    scanning=false; locked=false; scanAccum=0;
     mat.uniforms.uReveal.value=0;
     mat.uniforms.uHand.value=-1;
     ringMat.opacity=0;
@@ -354,22 +369,55 @@ function setupSession(session){
 tapEl.addEventListener('click',()=>{
   if(xrSess)return;
   if(!navigator.xr){showErr('WebXR indisponível');return;}
-  navigator.xr.requestSession('immersive-ar',{
+
+  const optFeatures=['hit-test','hand-tracking','dom-overlay'];
+  const sessionOpts={
     requiredFeatures:['local-floor'],
-    optionalFeatures:['hit-test','hand-tracking','dom-overlay'],
+    optionalFeatures:optFeatures,
     domOverlay:{root:document.body}
-  }).then(setupSession).catch(e=>{alert('Erro: '+(e.message||e));});
+  };
+  // Adiciona image-tracking se a imagem alvo estiver carregada
+  if(sculptureTarget){
+    sessionOpts.optionalFeatures.push('image-tracking');
+    sessionOpts.trackedImages=[{image:sculptureTarget, widthInMeters:0.45}];
+  }
+
+  navigator.xr.requestSession('immersive-ar',sessionOpts)
+    .then(setupSession)
+    .catch(e=>{alert('Erro: '+(e.message||e));});
 });
 
 // ── Loop ──────────────────────────────────────────────────────
 renderer.setAnimationLoop((ts,frame)=>{
   const t=clock.getElapsedTime();
-  const dt=Math.min(t-lastT,0.05);lastT=t;
+  const dt=Math.min(t-lastT,0.05); lastT=t;
   mat.uniforms.uTime.value=t;
 
   if(frame&&xrRef){
 
-    // Varredura
+    // ── Image tracking: posiciona bolha automático ──
+    if(frame.getImageTrackingResults){
+      const imgResults=frame.getImageTrackingResults();
+      for(const r of imgResults){
+        if(r.trackingState==='tracked'||r.trackingState==='emulated'){
+          const pose=frame.getPose(r.imageSpace,xrRef);
+          if(pose){
+            mesh.position.set(
+              pose.transform.position.x,
+              pose.transform.position.y,
+              pose.transform.position.z
+            );
+            if(!locked){
+              locked=true; scanning=false;
+              ringMat.opacity=0;
+              if(hitSrc){hitSrc.cancel();hitSrc=null;}
+            }
+          }
+        }
+      }
+    }
+
+    // ── Varredura por hit-test (fallback) ──
     if(scanning&&hitSrc){
       const hits=frame.getHitTestResults(hitSrc);
       if(hits.length>0){
@@ -377,12 +425,12 @@ renderer.setAnimationLoop((ts,frame)=>{
         if(p){
           ring.position.set(p.transform.position.x,p.transform.position.y+0.003,p.transform.position.z);
           scanAccum+=dt;
-          const prog=Math.min(scanAccum/2,1);
+          const prog=Math.min(scanAccum/1.5,1);
           ringMat.opacity=(0.3+prog*0.5)*(0.7+0.3*Math.sin(t*6));
           ring.scale.setScalar(1+0.06*Math.sin(t*5));
-          if(scanAccum>=2){
+          if(scanAccum>=1.5){
             mesh.position.set(p.transform.position.x,p.transform.position.y,p.transform.position.z);
-            scanning=false;locked=true;
+            scanning=false; locked=true;
             if(hitSrc){hitSrc.cancel();hitSrc=null;}
           }
         }
@@ -395,26 +443,24 @@ renderer.setAnimationLoop((ts,frame)=>{
     // Fade-in após lock
     if(locked){
       ringMat.opacity=Math.max(0,ringMat.opacity-dt*3);
-      mat.uniforms.uReveal.value=Math.min(1,mat.uniforms.uReveal.value+dt*0.5);
+      mat.uniforms.uReveal.value=Math.min(1,mat.uniforms.uReveal.value+dt*0.45);
     }
 
-    // Mãos
+    // Mãos + controladores
     const sess=renderer.xr.getSession();
     let minD=-1;
     for(const src of sess.inputSources){
 
-      // Controlador trigger → reage na bolha
       if(src.gamepad&&locked){
         const trigger=src.gamepad.buttons[0];
         if(trigger&&trigger.pressed&&mat.uniforms.uTime.value-mat.uniforms.uTouch.value>0.5){
           mat.uniforms.uTouch.value=t;
           hue+=Math.PI*0.72;
           mat.uniforms.uHue.value=hue;
-          playMetal(0.8);
+          playMetal(0.85);
         }
       }
 
-      // Hand tracking
       if(src.hand){
         const joints=src.handedness==='left'?handJointsL:handJointsR;
         const d=updateHandJoints(frame,joints,src.hand,xrRef);
@@ -422,7 +468,7 @@ renderer.setAnimationLoop((ts,frame)=>{
       }
     }
     mat.uniforms.uHand.value=minD;
-    // Som ao entrar na zona da bolha com a mão
+
     const handInside=minD>=0&&minD<0.4;
     if(handInside&&!handWasInside) playMetal(0.5);
     handWasInside=handInside;

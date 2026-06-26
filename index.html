@@ -295,7 +295,7 @@ function scanDepth(frame,viewerPose){
 // ── Estado ────────────────────────────────────────────────────
 let xrSess=null,xrRef=null,hitSrc=null;
 let scanning=false,locked=false,scanAccum=0;
-let markerLocked=false; // marcador encontrado pelo menos 1x
+let markerLocked=false,needsPlace=false;
 const clock=new THREE.Clock();
 let lastT=0;
 
@@ -326,15 +326,12 @@ function setupSession(session){
     .then(()=>session.requestReferenceSpace('local-floor'))
     .then(ref=>{
       xrRef=ref;
-      // Bolha aparece imediatamente à frente
-      mesh.position.set(0,0,-1.5);
-      halo.position.set(0,.004,-1.5);
-      locked=true;scanning=true;scanAccum=0;markerLocked=false;
+      locked=false;scanning=true;scanAccum=0;markerLocked=false;needsPlace=true;
       mat.uniforms.uReveal.value=0;haloMat.uniforms.uReveal.value=0;
+      poolMat.uniforms.uFill.value=0;
       lastT=clock.getElapsedTime();
       tapEl.classList.add('hidden');renderer.domElement.style.display='block';
-      status('Aponte a câmera para o marcador impresso…');
-      // Hit-test como fallback
+      status('Olhe para a escultura e aguarde…');
       return session.requestReferenceSpace('viewer')
         .then(vs=>session.requestHitTestSource({space:vs}))
         .catch(()=>null);
@@ -380,47 +377,60 @@ renderer.setAnimationLoop((ts,frame)=>{
   if(frame&&xrRef){
     const viewerPose=frame.getViewerPose(xrRef);
 
-    // ── Revela bolha sempre que locked ────────────────────────
+    poolMat.uniforms.uTime.value=t;
+
+    // ── Coloca bolha na direção do olhar no primeiro frame ────
+    if(needsPlace&&viewerPose){
+      const vt=viewerPose.transform;
+      const q=vt.orientation;
+      // Vetor forward a partir do quaternion: rotaciona (0,0,-1)
+      const fx=2*(q.x*q.z+q.w*q.y);
+      const fy=2*(q.y*q.z-q.w*q.x);
+      const fz=-(1-2*(q.x*q.x+q.y*q.y));
+      const fl=Math.sqrt(fx*fx+fz*fz)||1;
+      const px=vt.position.x+(fx/fl)*1.5;
+      const pz=vt.position.z+(fz/fl)*1.5;
+      mesh.position.set(px,0,pz);
+      halo.position.set(px,.004,pz);
+      ring.position.set(px,.003,pz);
+      locked=true;needsPlace=false;
+    }
+
+    // ── Revela bolha quando locked ────────────────────────────
     if(locked){
       const rev=Math.min(1,mat.uniforms.uReveal.value+dt*.4);
       mat.uniforms.uReveal.value=rev;haloMat.uniforms.uReveal.value=rev;
     }
 
-    // ── Image tracking: marcador impresso detectado ───────────
+    // ── Image tracking: marcador detectado → reposiciona ─────
     if(scanning&&frame.getImageTrackingResults){
-      const results=frame.getImageTrackingResults();
-      for(const r of results){
+      for(const r of frame.getImageTrackingResults()){
         if(r.trackingState==='tracked'){
           const pose=frame.getPose(r.imageSpace,xrRef);
           if(pose){
             const p=pose.transform.position;
-            // Marcador fica no chão, bolha centraliza sobre ele
-            lock(p.x,0,p.z);
-            markerLocked=true;
-            status('Marcador encontrado ✓');
+            lock(p.x,0,p.z);markerLocked=true;scanning=false;
+            poolMat.uniforms.uFill.value=0;status('');
           }
         }
       }
-      // Se perdeu o marcador temporariamente mas já achou antes, mantém posição
-      if(!markerLocked) status('Aponte a câmera para o marcador…');
     }
 
-    // ── Hit-test: reposiciona bolha enquanto scanning=true ──
-    poolMat.uniforms.uTime.value=t;
+    // ── Hit-test: pool de luz guia o reposicionamento ─────────
     if(scanning&&!markerLocked&&hitSrc){
       const hits=frame.getHitTestResults(hitSrc);
       if(hits.length>0){
         const p=hits[0].getPose(xrRef);
         if(p){
-          ring.position.set(p.transform.position.x,p.transform.position.y+.003,p.transform.position.z);
+          const hx=p.transform.position.x,hz=p.transform.position.z;
+          ring.position.set(hx,.003,hz);
           scanAccum+=dt;
           poolMat.uniforms.uFill.value=Math.min(1,scanAccum/3);
           ring.scale.setScalar(1+.04*Math.sin(t*4));
           if(scanAccum>=3){
-            mesh.position.set(p.transform.position.x,p.transform.position.y,p.transform.position.z);
-            halo.position.set(p.transform.position.x,p.transform.position.y+.004,p.transform.position.z);
-            scanning=false;poolMat.uniforms.uFill.value=0;
-            status('');
+            mesh.position.set(hx,0,hz);
+            halo.position.set(hx,.004,hz);
+            scanning=false;poolMat.uniforms.uFill.value=0;status('');
           }
         }
       } else {

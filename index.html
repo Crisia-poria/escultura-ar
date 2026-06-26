@@ -18,10 +18,19 @@
       color:rgba(255,255,255,.7);font:13px/1.5 monospace;letter-spacing:.5px;
       display:none;text-align:center;pointer-events:none;
       text-shadow:0 1px 4px rgba(0,0,0,.8);}
-    #exit{position:fixed;top:18px;right:18px;width:40px;height:40px;
-      border-radius:50%;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.3);
+    #exit{position:fixed;top:18px;right:18px;width:48px;height:48px;
+      border-radius:50%;
+      background:radial-gradient(circle at 35% 32%,
+        rgba(255,255,255,.65) 0%,rgba(190,225,255,.28) 28%,
+        rgba(130,170,255,.12) 58%,rgba(210,160,255,.20) 100%);
+      border:1.5px solid rgba(255,255,255,.45);
+      box-shadow:inset -3px -3px 9px rgba(100,160,255,.28),
+        inset 4px 4px 9px rgba(255,255,255,.38),
+        0 0 18px rgba(160,190,255,.30);
+      backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);
       cursor:pointer;display:none;align-items:center;justify-content:center;
-      font-size:18px;color:rgba(255,255,255,.7);z-index:9999;}
+      font-size:15px;color:rgba(255,255,255,.85);z-index:9999;
+      text-shadow:0 0 7px rgba(160,210,255,.9);}
   </style>
 </head>
 <body>
@@ -326,27 +335,38 @@ function ensureAudio(){
 }
 function playMetalWobble(vol=1.0){
   ensureAudio();const ac=audioCtx,now=ac.currentTime;
-  // Reverb simulado: dois delays em paralelo
-  const rev1=ac.createDelay(2);rev1.delayTime.value=0.09;
-  const rev2=ac.createDelay(2);rev2.delayTime.value=0.14;
-  const fb1=ac.createGain();fb1.gain.value=0.38;
-  const fb2=ac.createGain();fb2.gain.value=0.30;
-  const wet=ac.createGain();wet.gain.value=0.45;
+  // Reverb: dois delays cruzados para profundidade espacial
+  const rev1=ac.createDelay(3);rev1.delayTime.value=0.11;
+  const rev2=ac.createDelay(3);rev2.delayTime.value=0.17;
+  const fb1=ac.createGain();fb1.gain.value=0.42;
+  const fb2=ac.createGain();fb2.gain.value=0.35;
+  const wet=ac.createGain();wet.gain.value=0.52;
   rev1.connect(fb1);fb1.connect(rev1);rev1.connect(wet);
   rev2.connect(fb2);fb2.connect(rev2);rev2.connect(wet);
   wet.connect(ac.destination);
-  // Harmônicos de alumínio — sines ligeiramente desafinadas para beating natural
-  // [freq_base, amplitude, detune_ratio, decay_s]
-  [[82,1.00,1.0031,5.0],[164,.42,1.0018,4.2],[246,.20,0.9985,3.5],
-   [330,.10,1.0024,3.0],[490,.05,0.9973,2.5]].forEach(([f,g,dt,dur])=>{
-    const o=ac.createOscillator(),gn=ac.createGain();
-    o.type='sine';o.frequency.value=f*dt;
-    // ataque suave (metal tocado, não percutido)
+  // Modos de vibração de chapa de alumínio fina
+  // [freq, amplitude, dur] — frequências baixas e irregulares como chapa real
+  [[38,1.00,7.0],[55,0.72,6.2],[81,0.45,5.4],[112,0.22,4.5],[167,0.10,3.8]].forEach(([f,g,dur])=>{
+    // Par levemente desafinado → beating orgânico (oscilação irregular)
+    const o1=ac.createOscillator(),o2=ac.createOscillator();
+    // LFO lento e aleatório → chapa balançando de forma irregular
+    const lfo=ac.createOscillator(),lfoG=ac.createGain();
+    lfo.frequency.value=0.25+Math.random()*0.6;  // 0.25–0.85 Hz
+    lfoG.gain.value=f*0.018;
+    lfo.connect(lfoG);lfoG.connect(o1.frequency);lfoG.connect(o2.frequency);
+    lfo.start(now);lfo.stop(now+dur);
+    o1.type='sine';o2.type='sine';
+    o1.frequency.value=f;
+    o2.frequency.value=f*(1.002+Math.random()*.004);
+    const gn=ac.createGain();
     gn.gain.setValueAtTime(0,now);
-    gn.gain.linearRampToValueAtTime(vol*g*0.28,now+0.04);
-    gn.gain.setTargetAtTime(0,now+0.12,dur*0.38);
-    o.connect(gn);gn.connect(ac.destination);gn.connect(rev1);gn.connect(rev2);
-    o.start(now);o.stop(now+dur+1);
+    gn.gain.linearRampToValueAtTime(vol*g*0.18,now+0.12); // ataque bem suave
+    gn.gain.setTargetAtTime(vol*g*0.12,now+0.4,dur*0.28); // sustain irregular
+    gn.gain.setTargetAtTime(0,now+dur*0.45,dur*0.42);     // fade longo
+    o1.connect(gn);o2.connect(gn);
+    gn.connect(ac.destination);gn.connect(rev1);gn.connect(rev2);
+    o1.start(now);o1.stop(now+dur+2);
+    o2.start(now);o2.stop(now+dur+2);
   });
 }
 

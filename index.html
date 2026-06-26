@@ -43,35 +43,27 @@
 <script type="module">
 import * as THREE from 'three';
 
-// ── Perfil orgânico — forma irregular, não simétrica ──────────
-// [t, rx_lateral, rz_vertical] — blob achatado com lobos irregulares
+// ── Perfil: bolha de sabão gigante — esfera alongada suave ────
+// Maior, redonda, quase esférica em corte transversal
 const PROFILE=[
   [0.00, 0.010, 0.008],
-  [0.02, 0.048, 0.065],
-  [0.05, 0.110, 0.160],
-  [0.09, 0.185, 0.260],  // primeiro lóbulo largo
-  [0.14, 0.210, 0.295],
-  [0.18, 0.175, 0.235],  // estrangulamento
-  [0.23, 0.118, 0.150],  // cintura apertada
-  [0.28, 0.162, 0.200],
-  [0.33, 0.228, 0.310],  // barriga principal
-  [0.39, 0.255, 0.360],  // mais largo de todos
-  [0.44, 0.240, 0.335],
-  [0.49, 0.185, 0.250],
-  [0.53, 0.130, 0.165],  // cintura média
-  [0.58, 0.195, 0.255],
-  [0.63, 0.248, 0.330],  // lóbulo superior
-  [0.68, 0.265, 0.350],  // quase tão largo quanto o central
-  [0.73, 0.228, 0.305],
-  [0.78, 0.175, 0.228],
-  [0.83, 0.215, 0.280],  // pequeno lóbulo tardio
-  [0.88, 0.195, 0.255],
-  [0.92, 0.140, 0.182],
-  [0.96, 0.078, 0.098],
-  [0.99, 0.028, 0.032],
+  [0.04, 0.180, 0.165],
+  [0.10, 0.360, 0.340],
+  [0.18, 0.490, 0.470],
+  [0.27, 0.555, 0.535],
+  [0.37, 0.580, 0.560],
+  [0.47, 0.590, 0.572],  // centro — mais largo
+  [0.53, 0.590, 0.572],
+  [0.63, 0.578, 0.558],
+  [0.73, 0.540, 0.520],
+  [0.82, 0.460, 0.438],
+  [0.90, 0.320, 0.298],
+  [0.96, 0.158, 0.142],
+  [0.99, 0.040, 0.034],
   [1.00, 0.008, 0.006],
 ];
-const HEIGHT=0.90, SLICES=80, STACKS=128;
+const HEIGHT=1.9, SLICES=80, STACKS=128;
+const MAX_RX=0.590, MAX_RZ=0.572; // para cálculo de toque
 
 function interp(t){
   for(let i=0;i<PROFILE.length-1;i++){
@@ -85,32 +77,22 @@ function buildGeo(){
   const pos=[],nor=[],uv=[],idx=[];
   for(let i=0;i<=STACKS;i++){
     const t=i/STACKS;
-    const [rx,rz]=interp(t);
+    const[rx,rz]=interp(t);
     const e=0.004;
-    const [rxU,rzU]=interp(Math.min(t+e,1));
-    const [rxD,rzD]=interp(Math.max(t-e,0));
+    const[rxU,rzU]=interp(Math.min(t+e,1));
+    const[rxD,rzD]=interp(Math.max(t-e,0));
     const drx=(rxU-rxD)/(2*e*HEIGHT), drz=(rzU-rzD)/(2*e*HEIGHT);
-
     for(let j=0;j<=SLICES;j++){
       const a=2*Math.PI*j/SLICES, ca=Math.cos(a), sa=Math.sin(a);
-
-      // Perturbação orgânica grande — x e z independentes, amplitudes altas
-      const bx = Math.sin(a*0.9 + t*5.2)*0.072
-               + Math.sin(a*1.8 - t*3.5)*0.048
-               + Math.sin(a*0.4 + t*9.1)*0.055
-               + Math.sin(a*3.1 - t*1.9)*0.022;
-      const bz = Math.sin(a*1.2 + t*4.0)*0.065
-               + Math.sin(a*0.6 - t*7.8)*0.050
-               + Math.sin(a*2.5 + t*2.7)*0.030
-               + Math.sin(a*3.8 - t*4.3)*0.018;
-
-      pos.push((rx+bx)*ca, (rz+bz)*sa, -(t-0.5)*HEIGHT);
-
+      // Ondulação suave — bolha de sabão tem leve irregularidade, não lobular
+      const bx=Math.sin(a*0.8+t*4.7)*0.038+Math.sin(a*1.9-t*3.2)*0.022+Math.sin(a*3.3+t*1.5)*0.010;
+      const bz=Math.sin(a*1.1+t*3.5)*0.034+Math.sin(a*0.6-t*5.8)*0.020+Math.sin(a*2.7+t*2.1)*0.008;
+      pos.push((rx+bx)*ca,(rz+bz)*sa,-(t-0.5)*HEIGHT);
       const[tx1,ty1,tz1]=[-rx*sa,0,rz*ca],[tx2,ty2,tz2]=[drx*ca,1,drz*sa];
       let nx=ty1*tz2-tz1*ty2, ny=tz1*tx2-tx1*tz2, nz=tx1*ty2-ty1*tx2;
       const nl=Math.sqrt(nx*nx+ny*ny+nz*nz)||1;
-      nor.push(nx/nl, nz/nl, -ny/nl);
-      uv.push(j/SLICES, t);
+      nor.push(nx/nl,nz/nl,-ny/nl);
+      uv.push(j/SLICES,t);
     }
   }
   for(let i=0;i<STACKS;i++)for(let j=0;j<SLICES;j++){
@@ -135,7 +117,7 @@ document.body.insertBefore(renderer.domElement,document.getElementById('tap'));
 const scene=new THREE.Scene();
 const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,0.01,20);
 
-// ── Shader: bolha de sabão iridescente — NÃO branca ──────────
+// ── Shader: bolha de sabão — iridescência suave + aura do metal ──
 const mat=new THREE.ShaderMaterial({
   transparent:true,
   side:THREE.DoubleSide,
@@ -157,27 +139,20 @@ const mat=new THREE.ShaderMaterial({
 
     void main(){
       vUv=uv;
-      float dt=uTime-uTouch;
-      float alive=step(dt,5.);
-      // Onda de toque: propaga lentamente pela membrana
-      float waveFront=dt*.36;
+      float dt=uTime-uTouch, alive=step(dt,6.);
+      float waveFront=dt*.32;
       float distW=abs(vUv.y-waveFront);
-      float touchWave=exp(-distW*distW*20.)*alive
-                     *sin(dt*3.-vUv.y*7.)*max(0.,1.-dt*.18);
+      float touchWave=exp(-distW*distW*18.)*alive*sin(dt*2.8-vUv.y*6.)*max(0.,1.-dt*.15);
 
-      // Respiração lenta
-      float breathe=sin(uTime*.5+vUv.y*2.0)*0.010
-                   +sin(uTime*.29+vUv.x*2.8)*0.006;
+      float breathe=sin(uTime*.45+vUv.y*1.8)*.009+sin(uTime*.27+vUv.x*2.3)*.005;
 
-      // Mão: atração suave
       float hs=max(0.,1.-uHand*2.5)*step(0.,uHand)*step(uHand,.4);
-      float handPull=hs*0.016*sin(uTime*2.5+vUv.y*4.);
+      float handPull=hs*.013*sin(uTime*2.2+vUv.y*3.5);
 
-      // Noise líquido permanente
-      float n=smn(vUv*2.8+vec2(uTime*.14,uTime*.09));
-      float liq=(n-.5)*.014;
+      float n=smn(vUv*2.2+vec2(uTime*.11,uTime*.07));
+      float liq=(n-.5)*.012;
 
-      float disp=(touchWave*.028+breathe+handPull+liq)*uReveal;
+      float disp=(touchWave*.025+breathe+handPull+liq)*uReveal;
       vDisp=disp;
 
       vec3 displaced=position+normal*disp;
@@ -193,90 +168,94 @@ const mat=new THREE.ShaderMaterial({
       if(uReveal<=0.)discard;
       vec3 N=normalize(vN); vec3 V=normalize(vV);
       float NdotV=abs(dot(N,V));
-      float rim=pow(1.-NdotV,1.8);   // brilha nas bordas
-      float core=pow(NdotV,2.5);     // levemente visível no centro
+      float rim=pow(1.-NdotV,2.0);
+      float core=pow(NdotV,3.0);
 
-      float dt=uTime-uTouch, alive=step(dt,5.);
-      float decay=max(0.,1.-dt*.2)*alive;
+      float dt=uTime-uTouch, alive=step(dt,6.);
+      float decay=max(0.,1.-dt*.16)*alive;
       float hs=max(0.,1.-uHand*2.5)*step(0.,uHand)*step(uHand,.4);
 
-      // Onda de cor propaga com o toque
-      float waveFront=dt*.36;
-      float waveGlow=exp(-pow(vUv.y-waveFront,2.)*18.)*decay;
+      float waveFront=dt*.32;
+      float waveGlow=exp(-pow(vUv.y-waveFront,2.)*16.)*decay;
 
-      // Iridescência: interferência de filme fino
-      // Fase varia com ângulo de visão + posição UV + tempo lento
-      float ph=rim*9.+vUv.y*2.2-uTime*.38+vDisp*55.+uHue+waveGlow*3.;
-      // Separação de fases ampla → cores saturadas, nunca branco
+      // Iridescência suave: paleta pastel, menos saturada
+      float ph=rim*8.+vUv.y*1.8-uTime*.32+vDisp*45.+uHue+waveGlow*2.5;
       vec3 iri=vec3(
-        .5+.5*cos(ph),
-        .5+.5*cos(ph+2.42),  // verde-azul
-        .5+.5*cos(ph+4.71)   // violeta
+        .52+.28*cos(ph),
+        .52+.28*cos(ph+2.42),
+        .52+.28*cos(ph+4.71)
       );
 
-      float pulse=.5+.5*sin(uTime*1.5);
+      // Aura do metal: calor que sobe da escultura (vUv.y=0 = contato com metal)
+      float metalContact=pow(1.-vUv.y,3.5); // mais forte na base
+      float metalRise=max(0.,sin(vUv.y*3.14159-uTime*.7))*(1.-vUv.y)*.5;
+      // Cor quente: âmbar/dourado onde toca o metal, esfria ao subir
+      vec3 metalAura=mix(
+        vec3(.82,.62,.22),  // âmbar dourado — temperatura do alumínio
+        vec3(.38,.62,.82),  // azul frio — campo eletromagnético
+        vUv.y
+      )*(metalContact*.35+metalRise*.25);
 
-      // Toque: flash de cor na frente da onda
-      vec3 waveCol=iri*waveGlow*2.2;
+      float pulse=.5+.5*sin(uTime*1.4);
 
-      // Mão: shimmer
-      vec3 handCol=iri*hs*.9*(.5+.5*sin(uTime*4.+vUv.y*8.));
+      vec3 waveCol=iri*waveGlow*1.8;
+      vec3 handCol=iri*hs*.6*(.5+.5*sin(uTime*3.5+vUv.y*7.));
 
-      // Composição: dominantemente iridescente nas bordas
-      vec3 col=iri*(rim*.9+pulse*rim*.3+decay*.5)
+      vec3 col=iri*(rim*.7+pulse*rim*.2+decay*.4)
+              +metalAura
               +waveCol+handCol
-              +vec3(.05,.14,.22)*core*.4; // toque azul-escuro no centro
+              +vec3(.04,.10,.18)*core*.3;
 
-      // Alpha: bolha de sabão — quase invisível no centro, visível nas bordas
-      float a=(rim*.75+core*.08+waveGlow*.4+hs*.3+pulse*rim*.2)*uReveal;
-
-      gl_FragColor=vec4(col, clamp(a,0.,.88));
+      float a=(rim*.65+core*.06+waveGlow*.35+hs*.25+pulse*rim*.15+metalContact*.08)*uReveal;
+      gl_FragColor=vec4(col,clamp(a,0.,.82));
     }`
 });
 
-// ── Som: chapa de alumínio — osciladores graves + ruído de chacoalho ──
-let audioCtx=null;
-function playMetal(intensity=1.0){
-  if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();
-  if(audioCtx.state==='suspended') audioCtx.resume();
-  const ac=audioCtx, now=ac.currentTime;
+// ── Som: arquivos WAV reais + fallback sintético ───────────────
+let audioCtx=null, metalBuffers=[];
+const rawFetches=[fetch('metal1.wav').then(r=>r.arrayBuffer()).catch(()=>null),
+                  fetch('metal2.wav').then(r=>r.arrayBuffer()).catch(()=>null)];
 
-  // Ressonância fundamental de alumínio: harmônicos graves
-  [[195,1.0],[390,0.55],[585,0.28],[1050,0.12]].forEach(([f,g])=>{
-    const osc=ac.createOscillator(), gain=ac.createGain();
-    osc.type='triangle'; osc.frequency.value=f;
-    gain.gain.setValueAtTime(intensity*g*0.38, now);
-    gain.gain.setValueAtTime(intensity*g*0.38, now+0.04);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now+2.8);
-    osc.connect(gain); gain.connect(ac.destination);
-    osc.start(now); osc.stop(now+2.8);
-  });
-
-  // Textura de chacoalho: ruído em banda média-baixa
-  const bufSize=Math.floor(ac.sampleRate*0.6);
-  const buf=ac.createBuffer(1,bufSize,ac.sampleRate);
-  const data=buf.getChannelData(0);
-  for(let i=0;i<bufSize;i++){
-    // Pequenas rajadas irregulares simulando o tremor da chapa
-    const burst=Math.random()<0.006?(Math.random()*4+1):1;
-    data[i]=(Math.random()*2-1)*burst;
+async function initAudio(){
+  if(audioCtx) return;
+  audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+  const abs=await Promise.all(rawFetches);
+  for(const ab of abs){
+    if(!ab) continue;
+    try{ metalBuffers.push(await audioCtx.decodeAudioData(ab)); }catch(e){}
   }
-  const nSrc=ac.createBufferSource(); nSrc.buffer=buf;
-  const bp=ac.createBiquadFilter();
-  bp.type='bandpass'; bp.frequency.value=350; bp.Q.value=2.5;
-  const nGain=ac.createGain();
-  nGain.gain.setValueAtTime(intensity*0.7, now);
-  nGain.gain.exponentialRampToValueAtTime(0.0001, now+0.6);
-  nSrc.connect(bp); bp.connect(nGain); nGain.connect(ac.destination);
-  nSrc.start(now); nSrc.stop(now+0.6);
+}
+
+function playMetal(intensity=1.0){
+  if(!audioCtx) return;
+  if(audioCtx.state==='suspended') audioCtx.resume();
+  if(metalBuffers.length>0){
+    const buf=metalBuffers[Math.floor(Math.random()*metalBuffers.length)];
+    const src=audioCtx.createBufferSource(), g=audioCtx.createGain();
+    src.buffer=buf;
+    g.gain.value=intensity*.8;
+    src.connect(g); g.connect(audioCtx.destination);
+    src.start();
+  } else {
+    // Fallback sintético se WAVs não carregaram
+    const ac=audioCtx, now=ac.currentTime;
+    [[195,.9],[390,.45],[585,.22]].forEach(([f,v])=>{
+      const o=ac.createOscillator(), g=ac.createGain();
+      o.type='triangle'; o.frequency.value=f;
+      g.gain.setValueAtTime(intensity*v*.3,now);
+      g.gain.exponentialRampToValueAtTime(.0001,now+2.5);
+      o.connect(g); g.connect(ac.destination);
+      o.start(now); o.stop(now+2.5);
+    });
+  }
 }
 
 const mesh=new THREE.Mesh(buildGeo(),mat);
 scene.add(mesh);
 
-// ── Anel de varredura (fallback visual) ───────────────────────
+// ── Anel de varredura ─────────────────────────────────────────
 const ringMat=new THREE.MeshBasicMaterial({color:0x88ccff,transparent:true,opacity:0,side:THREE.DoubleSide});
-const ring=new THREE.Mesh(new THREE.RingGeometry(0.18,0.22,64),ringMat);
+const ring=new THREE.Mesh(new THREE.RingGeometry(0.22,0.27,64),ringMat);
 ring.rotation.x=-Math.PI/2;
 scene.add(ring);
 
@@ -289,39 +268,45 @@ const JOINT_NAMES=[
   'ring-finger-metacarpal','ring-finger-phalanx-proximal','ring-finger-phalanx-intermediate','ring-finger-phalanx-distal','ring-finger-tip',
   'pinky-finger-metacarpal','pinky-finger-phalanx-proximal','pinky-finger-phalanx-intermediate','pinky-finger-phalanx-distal','pinky-finger-tip',
 ];
-const handMat=new THREE.MeshBasicMaterial({color:0xaaddff,transparent:true,opacity:0.45});
-const jointGeo=new THREE.SphereGeometry(0.008,8,8);
-
+const handMat=new THREE.MeshBasicMaterial({color:0xaaddff,transparent:true,opacity:0.4});
+const jointGeo=new THREE.SphereGeometry(0.007,8,8);
 function makeHandJoints(){
-  return JOINT_NAMES.map(()=>{
-    const s=new THREE.Mesh(jointGeo,handMat);
-    s.visible=false; scene.add(s); return s;
-  });
+  return JOINT_NAMES.map(()=>{const s=new THREE.Mesh(jointGeo,handMat);s.visible=false;scene.add(s);return s;});
 }
-const handJointsL=makeHandJoints();
-const handJointsR=makeHandJoints();
+const handJointsL=makeHandJoints(), handJointsR=makeHandJoints();
 
-// ── Pré-carrega imagem alvo para image tracking ───────────────
+// ── Detecção de toque na SUPERFÍCIE da bolha ──────────────────
+// Verifica se um ponto cruzou a superfície (elipsoide) do exterior para interior
+let prevEllD={left:2,right:2}; // começa fora
+function ellipsoidDist(p){
+  if(!locked) return 2;
+  const lx=(p.x-mesh.position.x)/MAX_RX;
+  const ly=(p.y-mesh.position.y)/MAX_RZ;
+  const lz=(p.z-mesh.position.z)/(HEIGHT/2);
+  return Math.sqrt(lx*lx+ly*ly+lz*lz);
+}
+
+// ── Pre-load image tracking ───────────────────────────────────
 let sculptureTarget=null;
-fetch('escultura-mask.png')
-  .then(r=>r.blob())
-  .then(b=>createImageBitmap(b))
-  .then(bm=>{sculptureTarget=bm;})
-  .catch(()=>{});
+fetch('escultura-mask.png').then(r=>r.blob()).then(b=>createImageBitmap(b)).then(bm=>{sculptureTarget=bm;}).catch(()=>{});
 
 // ── Estado AR ─────────────────────────────────────────────────
 let xrSess=null,xrRef=null,hitSrc=null;
 let scanning=false,locked=false,scanAccum=0;
 const clock=new THREE.Clock();
-let hue=0,lastT=0,handWasInside=false;
+let hue=0,lastT=0;
 let imgStableFrames=0,imgSumX=0,imgSumZ=0;
 
 const tapEl=document.getElementById('tap');
 const errEl=document.getElementById('err');
 function showErr(msg){errEl.innerHTML=msg;errEl.style.display='block';}
 
-function updateHandJoints(frame,joints,hand,ref){
+function updateHandJoints(frame,joints,hand,ref,side){
   let minD=-1;
+  // Pontas de dedo que detectam toque na superfície
+  const tipNames=['index-finger-tip','middle-finger-tip','thumb-tip'];
+  let tipPos=null;
+
   JOINT_NAMES.forEach((name,i)=>{
     const jt=hand.get(name);
     if(!jt){joints[i].visible=false;return;}
@@ -331,11 +316,26 @@ function updateHandJoints(frame,joints,hand,ref){
     joints[i].position.set(p.x,p.y,p.z);
     joints[i].visible=true;
     if(locked){
-      const dx=p.x-mesh.position.x, dz=p.z-mesh.position.z;
+      const dx=p.x-mesh.position.x,dz=p.z-mesh.position.z;
       const d=Math.sqrt(dx*dx+dz*dz);
       if(minD<0||d<minD)minD=d;
+      if(name==='index-finger-tip') tipPos=p;
     }
   });
+
+  // Detecção de toque na superfície por cruzamento do elipsoide
+  if(tipPos&&locked){
+    const d=ellipsoidDist(tipPos);
+    const prev=prevEllD[side];
+    if(prev>1.05&&d<=1.0){
+      // Cruzou de fora para dentro = toque na superfície
+      playMetal(0.9);
+      mat.uniforms.uTouch.value=clock.getElapsedTime();
+      hue+=Math.PI*0.72; mat.uniforms.uHue.value=hue;
+    }
+    prevEllD[side]=d;
+  }
+
   return minD;
 }
 
@@ -361,31 +361,31 @@ function setupSession(session){
   session.addEventListener('end',()=>{
     xrSess=null; xrRef=null; hitSrc=null;
     scanning=false; locked=false; scanAccum=0;
-    mat.uniforms.uReveal.value=0;
-    mat.uniforms.uHand.value=-1;
+    mat.uniforms.uReveal.value=0; mat.uniforms.uHand.value=-1;
     ringMat.opacity=0;
     [...handJointsL,...handJointsR].forEach(j=>j.visible=false);
     renderer.domElement.style.display='none';
     tapEl.classList.remove('hidden');
+    imgStableFrames=0; imgSumX=0; imgSumZ=0;
+    prevEllD={left:2,right:2};
   });
 }
 
-tapEl.addEventListener('click',()=>{
-  if(xrSess)return;
+tapEl.addEventListener('click',async()=>{
+  if(xrSess) return;
   if(!navigator.xr){showErr('WebXR indisponível');return;}
-
+  await initAudio(); // inicia AudioContext no gesto do usuário
   const optFeatures=['hit-test','hand-tracking','dom-overlay'];
   const sessionOpts={
     requiredFeatures:['local-floor'],
     optionalFeatures:optFeatures,
     domOverlay:{root:document.body}
   };
-  // Adiciona image-tracking se a imagem alvo estiver carregada
   if(sculptureTarget){
     sessionOpts.optionalFeatures.push('image-tracking');
-    sessionOpts.trackedImages=[{image:sculptureTarget, widthInMeters:0.45}];
+    sessionOpts.trackedImages=[{image:sculptureTarget,widthInMeters:0.45}];
   }
-
+  // requestSession como PRIMEIRA call síncrona após await initAudio
   navigator.xr.requestSession('immersive-ar',sessionOpts)
     .then(setupSession)
     .catch(e=>{alert('Erro: '+(e.message||e));});
@@ -399,20 +399,16 @@ renderer.setAnimationLoop((ts,frame)=>{
 
   if(frame&&xrRef){
 
-    // ── Image tracking: só aceita após 30 frames estáveis no chão ──
+    // Image tracking: 30 frames estáveis no chão
     if(frame.getImageTrackingResults&&!locked){
-      const imgResults=frame.getImageTrackingResults();
-      for(const r of imgResults){
+      for(const r of frame.getImageTrackingResults()){
         if(r.trackingState==='tracked'){
           const pose=frame.getPose(r.imageSpace,xrRef);
           if(pose&&pose.transform.position.y<0.25){
-            imgStableFrames++;
-            imgSumX+=pose.transform.position.x;
-            imgSumZ+=pose.transform.position.z;
+            imgStableFrames++; imgSumX+=pose.transform.position.x; imgSumZ+=pose.transform.position.z;
             if(imgStableFrames>=30){
-              mesh.position.set(imgSumX/30, 0, imgSumZ/30);
-              locked=true; scanning=false;
-              ringMat.opacity=0;
+              mesh.position.set(imgSumX/30,0,imgSumZ/30);
+              locked=true; scanning=false; ringMat.opacity=0;
               if(hitSrc){hitSrc.cancel();hitSrc=null;}
             }
           } else { imgStableFrames=0; imgSumX=0; imgSumZ=0; }
@@ -420,17 +416,17 @@ renderer.setAnimationLoop((ts,frame)=>{
       }
     }
 
-    // ── Varredura por hit-test (fallback) ──
+    // Hit-test fallback
     if(scanning&&hitSrc){
       const hits=frame.getHitTestResults(hitSrc);
       if(hits.length>0){
         const p=hits[0].getPose(xrRef);
         if(p){
-          ring.position.set(p.transform.position.x,p.transform.position.y+0.003,p.transform.position.z);
+          ring.position.set(p.transform.position.x,p.transform.position.y+.003,p.transform.position.z);
           scanAccum+=dt;
           const prog=Math.min(scanAccum/1.5,1);
-          ringMat.opacity=(0.3+prog*0.5)*(0.7+0.3*Math.sin(t*6));
-          ring.scale.setScalar(1+0.06*Math.sin(t*5));
+          ringMat.opacity=(0.3+prog*.5)*(.7+.3*Math.sin(t*6));
+          ring.scale.setScalar(1+.06*Math.sin(t*5));
           if(scanAccum>=1.5){
             mesh.position.set(p.transform.position.x,p.transform.position.y,p.transform.position.z);
             scanning=false; locked=true;
@@ -443,37 +439,31 @@ renderer.setAnimationLoop((ts,frame)=>{
       }
     }
 
-    // Fade-in após lock
     if(locked){
       ringMat.opacity=Math.max(0,ringMat.opacity-dt*3);
-      mat.uniforms.uReveal.value=Math.min(1,mat.uniforms.uReveal.value+dt*0.45);
+      mat.uniforms.uReveal.value=Math.min(1,mat.uniforms.uReveal.value+dt*.4);
     }
 
-    // Mãos + controladores
     const sess=renderer.xr.getSession();
     let minD=-1;
     for(const src of sess.inputSources){
-
+      // Trigger do controle: não ativa som — só muda cor
       if(src.gamepad&&locked){
         const trigger=src.gamepad.buttons[0];
-        if(trigger&&trigger.pressed&&mat.uniforms.uTime.value-mat.uniforms.uTouch.value>0.5){
+        if(trigger&&trigger.pressed&&t-mat.uniforms.uTouch.value>0.5){
           mat.uniforms.uTouch.value=t;
-          hue+=Math.PI*0.72;
-          mat.uniforms.uHue.value=hue;
-          playMetal(0.85);
+          hue+=Math.PI*0.72; mat.uniforms.uHue.value=hue;
+          // sem som por trigger — só por toque físico
         }
       }
-
       if(src.hand){
+        const side=src.handedness==='left'?'left':'right';
         const joints=src.handedness==='left'?handJointsL:handJointsR;
-        const d=updateHandJoints(frame,joints,src.hand,xrRef);
-        if(d>=0&&(minD<0||d<minD))minD=d;
+        const d=updateHandJoints(frame,joints,src.hand,xrRef,side);
+        if(d>=0&&(minD<0||d<minD)) minD=d;
       }
     }
     mat.uniforms.uHand.value=minD;
-
-    // Som só por trigger — mão não dispara som, só visual
-    handWasInside=minD>=0&&minD<0.4;
   }
 
   renderer.render(scene,camera);

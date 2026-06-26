@@ -7,25 +7,29 @@
   <style>
     *{margin:0;padding:0;box-sizing:border-box;}
     html,body{width:100%;height:100%;background:#000;overflow:hidden;}
-    canvas{position:fixed;inset:0;width:100%!important;height:100%!important;}
-    #tap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+    #ar-container{position:fixed;inset:0;}
+    #tap{position:fixed;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;
       cursor:pointer;background:transparent;border:none;outline:none;}
     #tap::after{content:'';width:44px;height:44px;border:1px solid rgba(255,255,255,.2);
       border-radius:50%;animation:br 3s ease-in-out infinite;}
     @keyframes br{0%,100%{opacity:.2;transform:scale(1);}50%{opacity:.5;transform:scale(1.12);}}
     #tap.hidden{display:none;}
-    #err{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);
-      color:rgba(255,255,255,.35);font:11px/1.5 sans-serif;letter-spacing:1px;display:none;text-align:center;}
+    #err{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);z-index:20;
+      color:rgba(255,255,255,.6);font:13px/1.5 sans-serif;display:none;text-align:center;
+      background:rgba(0,0,0,.5);padding:8px 14px;border-radius:8px;}
   </style>
 </head>
 <body>
-<button id="tap" aria-label="iniciar AR"></button>
+<div id="ar-container"></div>
+<button id="tap" aria-label="iniciar"></button>
 <div id="err"></div>
-<script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.150.0/build/three.module.js"}}</script>
-<script type="module">
-import * as THREE from 'three';
 
-// ── Perfil ────────────────────────────────────────────────────
+<!-- Three.js e MindAR como scripts globais (não módulos) -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.150.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"></script>
+
+<script>
+// ── Perfil: meio-domo de bolha de sabão ───────────────────────
 const PROFILE=[
   [0.00,0.010,0.008],
   [0.04,0.165,0.155],
@@ -52,7 +56,7 @@ function interp(t){
   return PROFILE.at(-1).slice(1);
 }
 
-// ── Geometria: MEIO DOMO — ângulo 0→π (apenas parte superior) ─
+// Apenas metade superior (ângulo 0→π)
 function buildGeo(){
   const pos=[],nor=[],uv=[],idx=[];
   for(let i=0;i<=STACKS;i++){
@@ -60,16 +64,14 @@ function buildGeo(){
     const e=0.004,[rxU,rzU]=interp(Math.min(t+e,1)),[rxD,rzD]=interp(Math.max(t-e,0));
     const drx=(rxU-rxD)/(2*e*HEIGHT),drz=(rzU-rzD)/(2*e*HEIGHT);
     for(let j=0;j<=SLICES;j++){
-      // APENAS superior: ângulo 0→π (sin≥0, y≥0, acima do chão)
-      const a=Math.PI*j/SLICES, ca=Math.cos(a), sa=Math.sin(a);
-      const bx=Math.sin(a*.9+t*4.1)*.030+Math.sin(a*1.8-t*2.7)*.018+Math.sin(a*3.2+t*1.4)*.008;
-      const bz=Math.sin(a*1.1+t*3.4)*.026+Math.sin(a*.7-t*5.0)*.015+Math.sin(a*2.6+t*1.9)*.007;
+      const a=Math.PI*j/SLICES,ca=Math.cos(a),sa=Math.sin(a);
+      const bx=Math.sin(a*.9+t*4.1)*.030+Math.sin(a*1.8-t*2.7)*.018;
+      const bz=Math.sin(a*1.1+t*3.4)*.026+Math.sin(a*.7-t*5.0)*.015;
       pos.push((rx+bx)*ca,(rz+bz)*sa,-(t-.5)*HEIGHT);
       const[tx1,ty1,tz1]=[-rx*sa,0,rz*ca],[tx2,ty2,tz2]=[drx*ca,1,drz*sa];
       let nx=ty1*tz2-tz1*ty2,ny=tz1*tx2-tx1*tz2,nz=tx1*ty2-ty1*tx2;
       const nl=Math.sqrt(nx*nx+ny*ny+nz*nz)||1;
-      nor.push(nx/nl,nz/nl,-ny/nl);
-      uv.push(j/SLICES,t); // u: 0→1 por metade do anel; v: 0→1 ao longo
+      nor.push(nx/nl,nz/nl,-ny/nl);uv.push(j/SLICES,t);
     }
   }
   for(let i=0;i<STACKS;i++)for(let j=0;j<SLICES;j++){
@@ -82,16 +84,6 @@ function buildGeo(){
   g.setIndex(idx);return g;
 }
 
-// ── Renderer ──────────────────────────────────────────────────
-const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
-renderer.setPixelRatio(Math.min(devicePixelRatio,2));
-renderer.setSize(innerWidth,innerHeight);
-renderer.xr.enabled=true;
-renderer.domElement.style.display='none';
-document.body.insertBefore(renderer.domElement,document.getElementById('tap'));
-const scene=new THREE.Scene();
-const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,.01,20);
-
 // ── Shader ────────────────────────────────────────────────────
 const mat=new THREE.ShaderMaterial({
   transparent:true,side:THREE.DoubleSide,depthWrite:false,
@@ -102,22 +94,19 @@ const mat=new THREE.ShaderMaterial({
     uReveal:{value:0},uHand:{value:-1},uWind:{value:0}
   },
   vertexShader:`
-    uniform float uTime,uTouch,uReveal,uHand,uWind;
-    varying vec3 vN,vV;varying vec2 vUv;varying float vDisp,vY;
+    uniform float uTime,uTouch,uReveal,uWind;
+    varying vec3 vN,vV;varying vec2 vUv;varying float vDisp;
     float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5);}
     float ns(vec2 p){vec2 i=floor(p),f=fract(p)*fract(p)*(3.-2.*fract(p));
       return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y);}
     void main(){
-      vUv=uv; vY=position.y; // altura real acima do chão
+      vUv=uv;
       float dt=uTime-uTouch,alive=step(dt,7.);
       float wf=dt*.30,dw=abs(uv.y-wf);
       float tw=exp(-dw*dw*15.)*alive*sin(dt*2.5-uv.y*5.)*max(0.,1.-dt*.13);
-      // Brisa: onda que varre a superfície — AMPLITUDE GRANDE
-      float windPhase=uTime*.7-uv.y*3.5+uWind;
-      float wind=sin(windPhase)*.038*sin(uTime*.22+uv.x*2.);
-      float hs=max(0.,1.-uHand*2.5)*step(0.,uHand)*step(uHand,.35);
-      float lq=(ns(uv*2.+vec2(uTime*.09,uTime*.06))-.5)*.012;
+      float wind=sin(uTime*.7-uv.y*3.5+uWind)*.038*sin(uTime*.22+uv.x*2.);
       float br=sin(uTime*.42+uv.y*1.6)*.009+sin(uTime*.25+uv.x*2.1)*.006;
+      float lq=(ns(uv*2.+vec2(uTime*.09,uTime*.06))-.5)*.012;
       float d=(tw*.022+br+wind+lq)*uReveal;
       vDisp=d;
       vN=normalize(normalMatrix*normal);
@@ -125,48 +114,32 @@ const mat=new THREE.ShaderMaterial({
       vV=normalize(-mv.xyz);gl_Position=projectionMatrix*mv;
     }`,
   fragmentShader:`
-    uniform float uTime,uTouch,uHue,uReveal,uHand,uWind;
-    varying vec3 vN,vV;varying vec2 vUv;varying float vDisp,vY;
+    uniform float uTime,uTouch,uHue,uReveal,uWind;
+    varying vec3 vN,vV;varying vec2 vUv;varying float vDisp;
     void main(){
       if(uReveal<=0.)discard;
       vec3 N=normalize(vN),V=normalize(vV);
       float NdotV=abs(dot(N,V));
       float rim=pow(1.-NdotV,1.8);
       float core=pow(NdotV,3.5);
-
       float dt=uTime-uTouch,alive=step(dt,7.);
       float decay=max(0.,1.-dt*.14)*alive;
-      float hs=max(0.,1.-uHand*2.5)*step(0.,uHand)*step(uHand,.35);
-
       float wf=dt*.30;
       float waveGlow=exp(-pow(vUv.y-wf,2.)*14.)*decay;
-
-      // Iridescência: bandas de película fina com deriva lenta
       float ph=rim*7.+vUv.y*3.-uTime*.28+vDisp*38.+uHue+waveGlow*2.;
       vec3 iri=vec3(.5+.32*cos(ph),.5+.32*cos(ph+2.09),.5+.32*cos(ph+4.19));
-
-      // CONEXÃO COM O METAL (vUv.y=0 = contato com escultura no chão)
-      // Glow dourado intenso na borda inferior, subindo como calor
+      // Aura do metal: base quente (contato com escultura)
       float metalBase=pow(1.-vUv.y,3.)*uReveal;
       float metalPulse=(.5+.5*sin(uTime*1.1-vUv.y*5.))*pow(1.-vUv.y,1.5);
-      // Emanação: ondas que saem do ponto de contato com o metal e sobem
       float emanate=sin(vUv.y*6.28-uTime*1.4)*exp(-vUv.y*3.)*.5+.5;
-      vec3 metalCol=vec3(.95,.65,.10)*(metalBase*.8+metalPulse*.5)  // âmbar quente
-                   +vec3(.20,.50,.90)*emanate*pow(1.-vUv.y,2.)*.35; // azul EM sobe
-
-      // Brisa: shimmer visual que acompanha deslocamento
+      vec3 metalCol=vec3(.95,.65,.10)*(metalBase*.8+metalPulse*.5)
+                   +vec3(.20,.50,.90)*emanate*pow(1.-vUv.y,2.)*.35;
       float windVis=sin(uTime*.7-vUv.y*3.5+uWind)*(.5+.5*sin(uTime*.22))*rim*.3;
-
       float pulse=.5+.5*sin(uTime*1.3);
       vec3 waveCol=iri*waveGlow*1.8;
-      vec3 handCol=iri*hs*.5*(.5+.5*sin(uTime*3.+vUv.y*6.));
-
-      vec3 col=iri*(rim*.70+pulse*rim*.2+decay*.4+windVis)
-              +metalCol+waveCol+handCol
+      vec3 col=iri*(rim*.70+pulse*rim*.2+decay*.4+windVis)+metalCol+waveCol
               +vec3(.02,.06,.12)*core*.2;
-
-      float a=(rim*.68+core*.05+waveGlow*.38+hs*.2
-              +pulse*rim*.15+metalBase*.18+metalPulse*.10)*uReveal;
+      float a=(rim*.68+core*.05+waveGlow*.38+pulse*rim*.15+metalBase*.18+metalPulse*.10)*uReveal;
       gl_FragColor=vec4(col,clamp(a,0.,.85));
     }`
 });
@@ -187,230 +160,114 @@ const haloMat=new THREE.ShaderMaterial({
       gl_FragColor=vec4(c,clamp(a,0.,.4));
     }`
 });
-const halo=new THREE.Mesh(new THREE.RingGeometry(.05,.58,80),haloMat);
-halo.rotation.x=-Math.PI/2;halo.position.y=.004;scene.add(halo);
+const halo=new THREE.Mesh(new THREE.RingGeometry(.05,1.2,80),haloMat);
+// Sem rotação extra — no espaço do anchor o plano da imagem já é horizontal
 
-// ── Som: metal wobble — osciladores com LFO ────────────────────
+// ── Mesh ──────────────────────────────────────────────────────
+const mesh=new THREE.Mesh(buildGeo(),mat);
+// Rotação para alinhar o domo apontando para cima no espaço do anchor
+// No anchor do MindAR: XY = plano da imagem, Z = normal (para cima)
+// Nossa geometria: domo abre em +Y — após Rx(π/2) o +Y vira +Z (para cima) ✓
+mesh.rotation.x=Math.PI/2;
+// Escala: 1 unidade MindAR = largura da imagem alvo
+// A bolha deve cobrir a escultura e ir além — escala generosa
+mesh.scale.set(3.0,3.0,3.0);
+halo.scale.set(2.5,2.5,2.5);
+
+// ── Som: metal wobble ─────────────────────────────────────────
 let audioCtx=null;
-
-function ensureAudio(){
-  if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();
-  if(audioCtx.state==='suspended') audioCtx.resume();
-  return audioCtx;
-}
+let hue=0;
+const clock=new THREE.Clock();
 
 function playMetalWobble(vol=1.0){
-  const ac=ensureAudio();
-  const now=ac.currentTime, dur=4.0;
-  // LFO de wobble: oscila a frequência dos harmônicos
-  const lfo=ac.createOscillator(), lfoG=ac.createGain();
-  lfo.frequency.value=3.8; lfoG.gain.value=22;
-  lfo.connect(lfoG); lfo.start(now); lfo.stop(now+dur);
-  // Harmônicos de chapa metálica
+  if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+  if(audioCtx.state==='suspended') audioCtx.resume();
+  const ac=audioCtx,now=ac.currentTime,dur=4.0;
+  const lfo=ac.createOscillator(),lfoG=ac.createGain();
+  lfo.frequency.value=3.8;lfoG.gain.value=22;
+  lfo.connect(lfoG);lfo.start(now);lfo.stop(now+dur);
   [[72,1.0],[144,.55],[216,.32],[340,.18],[560,.08]].forEach(([f,g])=>{
-    const osc=ac.createOscillator(), gain=ac.createGain();
-    osc.type='sawtooth'; osc.frequency.value=f;
-    lfoG.connect(osc.frequency); // wobble modula frequência
+    const osc=ac.createOscillator(),gain=ac.createGain();
+    osc.type='sawtooth';osc.frequency.value=f;
+    lfoG.connect(osc.frequency);
     gain.gain.setValueAtTime(0,now);
     gain.gain.linearRampToValueAtTime(vol*g*.35,now+.05);
     gain.gain.exponentialRampToValueAtTime(.0001,now+dur);
-    osc.connect(gain); gain.connect(ac.destination);
-    osc.start(now); osc.stop(now+dur);
+    osc.connect(gain);gain.connect(ac.destination);
+    osc.start(now);osc.stop(now+dur);
   });
 }
 
-const mesh=new THREE.Mesh(buildGeo(),mat);
-scene.add(mesh);
-
-// ── Anel de varredura ─────────────────────────────────────────
-const ringMat=new THREE.MeshBasicMaterial({color:0x88ccff,transparent:true,opacity:0,side:THREE.DoubleSide});
-const ring=new THREE.Mesh(new THREE.RingGeometry(.20,.25,64),ringMat);
-ring.rotation.x=-Math.PI/2;scene.add(ring);
-
-// ── Joints das mãos ───────────────────────────────────────────
-const JNAMES=[
-  'wrist',
-  'thumb-metacarpal','thumb-phalanx-proximal','thumb-phalanx-distal','thumb-tip',
-  'index-finger-metacarpal','index-finger-phalanx-proximal','index-finger-phalanx-intermediate','index-finger-phalanx-distal','index-finger-tip',
-  'middle-finger-metacarpal','middle-finger-phalanx-proximal','middle-finger-phalanx-intermediate','middle-finger-phalanx-distal','middle-finger-tip',
-  'ring-finger-metacarpal','ring-finger-phalanx-proximal','ring-finger-phalanx-intermediate','ring-finger-phalanx-distal','ring-finger-tip',
-  'pinky-finger-metacarpal','pinky-finger-phalanx-proximal','pinky-finger-phalanx-intermediate','pinky-finger-phalanx-distal','pinky-finger-tip',
-];
-const TIP_NAMES=new Set(['index-finger-tip','middle-finger-tip','thumb-tip','ring-finger-tip','pinky-finger-tip']);
-const handMat=new THREE.MeshBasicMaterial({color:0xaaddff,transparent:true,opacity:.38});
-const jointGeo=new THREE.SphereGeometry(.007,8,8);
-function makeJoints(){return JNAMES.map(()=>{const s=new THREE.Mesh(jointGeo,handMat);s.visible=false;scene.add(s);return s;});}
-const handJointsL=makeJoints(),handJointsR=makeJoints();
-
-// ── Detecção de toque: cruzamento do elipsoide ────────────────
-const prevD={left:2,right:2};
-function ellD(p){
-  if(!locked)return 2;
-  const lx=(p.x-mesh.position.x)/MAX_RX;
-  const ly=p.y/MAX_RZ; // y relativo ao chão (0=chão)
-  const lz=(p.z-mesh.position.z)/(HEIGHT/2);
-  return Math.sqrt(lx*lx+ly*ly+lz*lz);
-}
-
-// ── Pré-carrega imagem alvo ───────────────────────────────────
-let sculptureTarget=null;
-fetch('escultura-mask.png').then(r=>r.blob()).then(b=>createImageBitmap(b)).then(bm=>{sculptureTarget=bm;}).catch(()=>{});
-
-// ── Estado ────────────────────────────────────────────────────
-let xrSess=null,xrRef=null,hitSrc=null;
-let scanning=false,locked=false,scanAccum=0;
-const clock=new THREE.Clock();
-let hue=0,lastT=0,imgFrames=0,imgSX=0,imgSZ=0;
-
+// ── Iniciar ───────────────────────────────────────────────────
 const tapEl=document.getElementById('tap');
 const errEl=document.getElementById('err');
-function showErr(m){errEl.innerHTML=m;errEl.style.display='block';}
 
-function updateHands(frame,joints,hand,ref,side){
-  let minD=-1;
-  JNAMES.forEach((name,i)=>{
-    const jt=hand.get(name);
-    if(!jt){joints[i].visible=false;return;}
-    const pose=frame.getJointPose(jt,ref);
-    if(!pose){joints[i].visible=false;return;}
-    const p=pose.transform.position;
-    joints[i].position.set(p.x,p.y,p.z);joints[i].visible=true;
-    if(locked){
-      const dx=p.x-mesh.position.x,dz=p.z-mesh.position.z;
-      const d=Math.sqrt(dx*dx+dz*dz);
-      if(minD<0||d<minD)minD=d;
-    }
-    if(TIP_NAMES.has(name)&&locked){
-      const d=ellD(p);
-      if(prevD[side]>1.05&&d<=1.0){
-        // Toque: entrou na superfície da bolha
-        playMetalWobble(.9);
-        mat.uniforms.uTouch.value=clock.getElapsedTime();
-        hue+=Math.PI*.72;mat.uniforms.uHue.value=hue;
-      }
-      prevD[side]=d<prevD[side]?d:Math.min(2,prevD[side]+.03);
-    }
-  });
-  return minD;
-}
+tapEl.addEventListener('click',async()=>{
+  tapEl.classList.add('hidden');
+  // AudioContext no gesto do usuário
+  if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();
 
-function setupSession(session){
-  xrSess=session;
-  renderer.xr.setReferenceSpaceType('local-floor');
-  renderer.xr.setSession(session)
-    .then(()=>session.requestReferenceSpace('local-floor'))
-    .then(ref=>{
-      xrRef=ref;
-      return session.requestReferenceSpace('viewer')
-        .then(vs=>session.requestHitTestSource({space:vs}))
-        .catch(()=>null);
-    }).then(hs=>{
-      hitSrc=hs;scanning=true;locked=false;scanAccum=0;
-      mat.uniforms.uReveal.value=0;haloMat.uniforms.uReveal.value=0;
-      lastT=clock.getElapsedTime();
-      tapEl.classList.add('hidden');renderer.domElement.style.display='block';
-    }).catch(e=>showErr(e.message));
+  const MindARThree=window.MINDAR.IMAGE.MindARThree;
+  let mindarThree;
+  try{
+    mindarThree=new MindARThree({
+      container:document.getElementById('ar-container'),
+      imageTargetSrc:'targets.mind',
+      maxTrack:1,
+      uiLoading:'yes',
+      uiScanning:'yes',
+    });
+  }catch(e){
+    errEl.textContent='MindAR: '+(e.message||e);errEl.style.display='block';
+    tapEl.classList.remove('hidden');return;
+  }
 
-  session.addEventListener('end',()=>{
-    xrSess=null;xrRef=null;hitSrc=null;
-    scanning=false;locked=false;scanAccum=0;
-    mat.uniforms.uReveal.value=0;mat.uniforms.uHand.value=-1;
-    haloMat.uniforms.uReveal.value=0;ringMat.opacity=0;
-    [...handJointsL,...handJointsR].forEach(j=>j.visible=false);
-    renderer.domElement.style.display='none';tapEl.classList.remove('hidden');
-    imgFrames=0;imgSX=0;imgSZ=0;prevD.left=2;prevD.right=2;
-  });
-}
+  const{renderer,scene,camera}=mindarThree;
 
-tapEl.addEventListener('click',()=>{
-  if(xrSess)return;
-  if(!navigator.xr){showErr('WebXR indisponível');return;}
-  ensureAudio(); // cria AudioContext no gesto do usuário
-  const opts={
-    requiredFeatures:['local-floor'],
-    optionalFeatures:['hit-test','hand-tracking','dom-overlay'],
-    domOverlay:{root:document.body}
+  // Adiciona malha e halo ao anchor da escultura (índice 0)
+  const anchor=mindarThree.addAnchor(0);
+  anchor.group.add(mesh);
+  anchor.group.add(halo);
+
+  // Fade-in quando detecta
+  anchor.onTargetFound=()=>{
+    mat.uniforms.uReveal.value=0;
+    haloMat.uniforms.uReveal.value=0;
   };
-  if(sculptureTarget){
-    opts.optionalFeatures.push('image-tracking');
-    opts.trackedImages=[{image:sculptureTarget,widthInMeters:.45}];
-  }
-  navigator.xr.requestSession('immersive-ar',opts)
-    .then(setupSession)
-    .catch(e=>alert('Erro: '+(e.message||e)));
-});
 
-// ── Loop ──────────────────────────────────────────────────────
-renderer.setAnimationLoop((ts,frame)=>{
-  const t=clock.getElapsedTime();
-  const dt=Math.min(t-lastT,.05);lastT=t;
-  mat.uniforms.uTime.value=t;
-  mat.uniforms.uWind.value=t;
-  haloMat.uniforms.uTime.value=t;
+  // Toque na tela = interação com a bolha
+  renderer.domElement.addEventListener('click',()=>{
+    if(!anchor.group.visible)return;
+    playMetalWobble(.9);
+    mat.uniforms.uTouch.value=clock.getElapsedTime();
+    hue+=Math.PI*.72;mat.uniforms.uHue.value=hue;
+  });
 
-  if(frame&&xrRef){
-    // Image tracking
-    if(frame.getImageTrackingResults&&!locked){
-      for(const r of frame.getImageTrackingResults()){
-        if(r.trackingState==='tracked'){
-          const pose=frame.getPose(r.imageSpace,xrRef);
-          if(pose&&pose.transform.position.y<.25){
-            imgFrames++;imgSX+=pose.transform.position.x;imgSZ+=pose.transform.position.z;
-            if(imgFrames>=30){
-              const px=imgSX/30,pz=imgSZ/30;
-              mesh.position.set(px,0,pz);halo.position.set(px,.004,pz);
-              locked=true;scanning=false;ringMat.opacity=0;
-              if(hitSrc){hitSrc.cancel();hitSrc=null;}
-            }
-          } else {imgFrames=0;imgSX=0;imgSZ=0;}
-        }
-      }
-    }
-    // Hit-test fallback
-    if(scanning&&hitSrc){
-      const hits=frame.getHitTestResults(hitSrc);
-      if(hits.length>0){
-        const p=hits[0].getPose(xrRef);
-        if(p){
-          const px=p.transform.position.x,py=p.transform.position.y,pz=p.transform.position.z;
-          ring.position.set(px,py+.003,pz);
-          scanAccum+=dt;
-          ringMat.opacity=(0.4+Math.min(scanAccum/1.5,.6))*(.7+.3*Math.sin(t*6));
-          ring.scale.setScalar(1+.06*Math.sin(t*5));
-          if(scanAccum>=1.5){
-            mesh.position.set(px,py,pz);halo.position.set(px,py+.004,pz);
-            scanning=false;locked=true;
-            if(hitSrc){hitSrc.cancel();hitSrc=null;}
-          }
-        }
-      } else {scanAccum=Math.max(0,scanAccum-dt*2);ringMat.opacity=Math.max(0,ringMat.opacity-dt*2);}
-    }
-    if(locked){
-      ringMat.opacity=Math.max(0,ringMat.opacity-dt*3);
-      const rev=Math.min(1,mat.uniforms.uReveal.value+dt*.4);
-      mat.uniforms.uReveal.value=rev;haloMat.uniforms.uReveal.value=rev;
-    }
-
-    const sess=renderer.xr.getSession();
-    let minD=-1;
-    for(const src of sess.inputSources){
-      if(src.hand){
-        const side=src.handedness==='left'?'left':'right';
-        const joints=src.handedness==='left'?handJointsL:handJointsR;
-        const d=updateHands(frame,joints,src.hand,xrRef,side);
-        if(d>=0&&(minD<0||d<minD))minD=d;
-      }
-    }
-    mat.uniforms.uHand.value=minD;
+  try{
+    await mindarThree.start();
+  }catch(e){
+    errEl.textContent='Câmera: '+(e.message||e);errEl.style.display='block';
+    tapEl.classList.remove('hidden');return;
   }
 
-  renderer.render(scene,camera);
-});
+  renderer.setAnimationLoop(()=>{
+    const t=clock.getElapsedTime();
+    mat.uniforms.uTime.value=t;
+    mat.uniforms.uWind.value=t;
+    haloMat.uniforms.uTime.value=t;
 
-window.addEventListener('resize',()=>{
-  camera.aspect=innerWidth/innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth,innerHeight);
+    if(anchor.group.visible){
+      const rev=Math.min(1,mat.uniforms.uReveal.value+.016);
+      mat.uniforms.uReveal.value=rev;
+      haloMat.uniforms.uReveal.value=rev;
+    } else {
+      const rev=Math.max(0,mat.uniforms.uReveal.value-.016);
+      mat.uniforms.uReveal.value=rev;
+      haloMat.uniforms.uReveal.value=rev;
+    }
+
+    renderer.render(scene,camera);
+  });
 });
 </script>
 </body>

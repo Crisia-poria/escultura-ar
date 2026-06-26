@@ -202,9 +202,26 @@ function playMetalWobble(vol=1.0){
 const tapEl=document.getElementById('tap');
 const errEl=document.getElementById('err');
 
+// Verifica se MindAR carregou
+window.addEventListener('load',()=>{
+  if(!window.MINDAR||!window.MINDAR.IMAGE){
+    errEl.textContent='MindAR não carregou. Verifique conexão.';
+    errEl.style.display='block';
+  }
+});
+
 tapEl.addEventListener('click',async()=>{
+  errEl.style.display='none';
+
+  // Verifica disponibilidade
+  if(!window.MINDAR||!window.MINDAR.IMAGE){
+    errEl.textContent='MindAR não disponível. Recarregue a página.';
+    errEl.style.display='block';return;
+  }
+
   tapEl.classList.add('hidden');
-  // AudioContext no gesto do usuário
+  errEl.textContent='Iniciando câmera…';errEl.style.display='block';
+
   if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();
 
   const MindARThree=window.MINDAR.IMAGE.MindARThree;
@@ -218,7 +235,7 @@ tapEl.addEventListener('click',async()=>{
       uiScanning:'yes',
     });
   }catch(e){
-    errEl.textContent='MindAR: '+(e.message||e);errEl.style.display='block';
+    errEl.textContent='Erro MindAR: '+(e.message||e);errEl.style.display='block';
     tapEl.classList.remove('hidden');return;
   }
 

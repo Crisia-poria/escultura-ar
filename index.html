@@ -6,294 +6,166 @@
   <title>Bolha digital sob metal</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; background: #000; overflow: hidden; touch-action: none; }
-    canvas { position: fixed; inset: 0; width: 100% !important; height: 100% !important; }
-    #tap {
-      position: fixed; inset: 0;
-      display: flex; align-items: center; justify-content: center;
+    html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
+    #loading {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      background: #000; z-index: 10;
     }
-    #tap::after {
+    #loading::after {
       content: '';
-      width: 48px; height: 48px;
-      border: 1px solid rgba(255,255,255,0.18);
+      width: 40px; height: 40px;
+      border: 1px solid rgba(140,200,255,0.2);
+      border-top-color: rgba(140,200,255,0.7);
       border-radius: 50%;
-      animation: breathe 3s ease-in-out infinite;
+      animation: spin 1.2s linear infinite;
     }
-    @keyframes breathe {
-      0%,100% { opacity: 0.18; transform: scale(1); }
-      50%      { opacity: 0.45; transform: scale(1.15); }
-    }
-    #tap.hidden { display: none; }
-    #err {
-      position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%);
-      color: rgba(255,255,255,0.3); font: 11px/1 sans-serif; letter-spacing: 2px;
-      display: none; text-align: center; max-width: 80vw;
-    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #loading.hidden { display: none; }
   </style>
+  <!-- MindAR bundled com Three.js -->
+  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"></script>
 </head>
 <body>
-<button id="tap" aria-label="iniciar"></button>
-<div id="err"></div>
+<div id="loading"></div>
 
-<script type="importmap">
-{"imports":{"three":"https://unpkg.com/three@0.150.0/build/three.module.js"}}
-</script>
-<script type="module">
-import * as THREE from 'three';
+<script>
+window.addEventListener('load', async () => {
+  const THREE = window.THREE;
+  const loading = document.getElementById('loading');
 
-// ── Perfil orgânico da escultura ─────────────────────────────
-const PROFILE = [
-  [0.00,0.018,0.013],[0.03,0.060,0.045],[0.07,0.105,0.078],
-  [0.13,0.128,0.095],[0.19,0.118,0.088],[0.25,0.082,0.060],
-  [0.30,0.100,0.074],[0.36,0.138,0.102],[0.42,0.148,0.110],
-  [0.47,0.128,0.094],[0.52,0.086,0.063],[0.57,0.112,0.082],
-  [0.63,0.146,0.107],[0.68,0.152,0.112],[0.73,0.132,0.097],
-  [0.77,0.112,0.082],[0.82,0.138,0.101],[0.87,0.148,0.108],
-  [0.91,0.120,0.088],[0.95,0.082,0.060],[0.98,0.048,0.035],
-  [1.00,0.018,0.013],
-];
-const HEIGHT=0.55, SLICES=56, STACKS=88;
+  // ── Perfil orgânico da escultura ───────────────────────────
+  const PROFILE = [
+    [0.00,0.018,0.013],[0.03,0.060,0.045],[0.07,0.105,0.078],
+    [0.13,0.128,0.095],[0.19,0.118,0.088],[0.25,0.082,0.060],
+    [0.30,0.100,0.074],[0.36,0.138,0.102],[0.42,0.148,0.110],
+    [0.47,0.128,0.094],[0.52,0.086,0.063],[0.57,0.112,0.082],
+    [0.63,0.146,0.107],[0.68,0.152,0.112],[0.73,0.132,0.097],
+    [0.77,0.112,0.082],[0.82,0.138,0.101],[0.87,0.148,0.108],
+    [0.91,0.120,0.088],[0.95,0.082,0.060],[0.98,0.048,0.035],
+    [1.00,0.018,0.013],
+  ];
+  const HEIGHT=0.55, SLICES=56, STACKS=88;
 
-function interp(t) {
-  for (let i=0;i<PROFILE.length-1;i++) {
-    const [t0,a,b]=PROFILE[i],[t1,c,d]=PROFILE[i+1];
-    if (t>=t0&&t<=t1){const f=(t1>t0)?(t-t0)/(t1-t0):0;return[a+f*(c-a),b+f*(d-b)];}
-  }
-  return PROFILE.at(-1).slice(1);
-}
-
-function buildGeo() {
-  const pos=[],nor=[],uv=[],idx=[];
-  for (let i=0;i<=STACKS;i++) {
-    const t=i/STACKS, y=(t-0.5)*HEIGHT, [rx,rz]=interp(t);
-    const e=0.005,[rxU,rzU]=interp(Math.min(t+e,1)),[rxD,rzD]=interp(Math.max(t-e,0));
-    const drx=(rxU-rxD)/(2*e*HEIGHT), drz=(rzU-rzD)/(2*e*HEIGHT);
-    for (let j=0;j<=SLICES;j++) {
-      const a=2*Math.PI*j/SLICES, ca=Math.cos(a), sa=Math.sin(a);
-      const vx=rx*ca, vz=rz*sa;
-      pos.push(vx, vz, -y); // rotação -90°X baked
-      const [tx1,ty1,tz1]=[-rx*sa,0,rz*ca],[tx2,ty2,tz2]=[drx*ca,1,drz*sa];
-      let nx=ty1*tz2-tz1*ty2, ny=tz1*tx2-tx1*tz2, nz=tx1*ty2-ty1*tx2;
-      const nl=Math.sqrt(nx*nx+ny*ny+nz*nz)||1;
-      nor.push(nx/nl, nz/nl, -ny/nl);
-      uv.push(j/SLICES,t);
+  function interp(t) {
+    for (let i=0;i<PROFILE.length-1;i++) {
+      const [t0,a,b]=PROFILE[i],[t1,c,d]=PROFILE[i+1];
+      if (t>=t0&&t<=t1){const f=(t1>t0)?(t-t0)/(t1-t0):0;return[a+f*(c-a),b+f*(d-b)];}
     }
+    return PROFILE.at(-1).slice(1);
   }
-  for (let i=0;i<STACKS;i++) for(let j=0;j<SLICES;j++){
-    const a=i*(SLICES+1)+j,b=a+SLICES+1;
-    idx.push(a,b,a+1,b,b+1,a+1);
+
+  function buildGeo() {
+    const pos=[],nor=[],uv=[],idx=[];
+    for (let i=0;i<=STACKS;i++) {
+      const t=i/STACKS, y=(t-0.5)*HEIGHT, [rx,rz]=interp(t);
+      const e=0.005,[rxU,rzU]=interp(Math.min(t+e,1)),[rxD,rzD]=interp(Math.max(t-e,0));
+      const drx=(rxU-rxD)/(2*e*HEIGHT), drz=(rzU-rzD)/(2*e*HEIGHT);
+      for (let j=0;j<=SLICES;j++) {
+        const a=2*Math.PI*j/SLICES, ca=Math.cos(a), sa=Math.sin(a);
+        const vx=rx*ca, vz=rz*sa;
+        pos.push(vx, vz, -y);
+        const [tx1,ty1,tz1]=[-rx*sa,0,rz*ca],[tx2,ty2,tz2]=[drx*ca,1,drz*sa];
+        let nx=ty1*tz2-tz1*ty2, ny=tz1*tx2-tx1*tz2, nz=tx1*ty2-ty1*tx2;
+        const nl=Math.sqrt(nx*nx+ny*ny+nz*nz)||1;
+        nor.push(nx/nl, nz/nl, -ny/nl);
+        uv.push(j/SLICES,t);
+      }
+    }
+    for (let i=0;i<STACKS;i++) for(let j=0;j<SLICES;j++){
+      const a=i*(SLICES+1)+j,b=a+SLICES+1;
+      idx.push(a,b,a+1,b,b+1,a+1);
+    }
+    const g=new THREE.BufferGeometry();
+    g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
+    g.setAttribute('normal',new THREE.Float32BufferAttribute(nor,3));
+    g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));
+    g.setIndex(idx); return g;
   }
-  const g=new THREE.BufferGeometry();
-  g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
-  g.setAttribute('normal',new THREE.Float32BufferAttribute(nor,3));
-  g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));
-  g.setIndex(idx); return g;
-}
 
-// ── Renderer ─────────────────────────────────────────────────
-const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
-renderer.setPixelRatio(Math.min(devicePixelRatio,2));
-renderer.setSize(innerWidth,innerHeight);
-renderer.xr.enabled=true;
-renderer.domElement.style.display='none';
-document.body.insertBefore(renderer.domElement,document.getElementById('tap'));
-
-const scene=new THREE.Scene();
-const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,0.01,20);
-
-// ── Shader iridescente + reveal ──────────────────────────────
-const mat=new THREE.ShaderMaterial({
-  transparent:true, side:THREE.DoubleSide, depthWrite:false,
-  uniforms:{
-    uTime:{value:0}, uTouch:{value:-99},
-    uHand:{value:-1}, uHue:{value:0},
-    uReveal:{value:0}  // 0=invisível → 1=completo
-  },
-  vertexShader:`
-    varying vec3 vN,vV; varying vec2 vUv;
-    void main(){
-      vUv=uv; vN=normalize(normalMatrix*normal);
-      vec4 mv=modelViewMatrix*vec4(position,1.);
-      vV=normalize(-mv.xyz); gl_Position=projectionMatrix*mv;
-    }`,
-  fragmentShader:`
-    uniform float uTime,uTouch,uHand,uHue,uReveal;
-    varying vec3 vN,vV; varying vec2 vUv;
-    void main(){
-      if(uReveal<=0.) discard;
-      float f=pow(1.-abs(dot(normalize(vN),normalize(vV))),1.3);
-
-      float dt=uTime-uTouch, alive=step(dt,2.5);
-      float decay=max(0.,1.-dt*.5)*alive;
-      float tw=sin(dt*14.-vUv.y*10.)*decay*.65;
-
-      float hs=max(0.,1.-uHand*3.)*step(0.,uHand)*step(uHand,.35);
-      float hw=sin(uTime*18.-vUv.y*12.)*hs*.7;
-
-      float ph=f*6.5+vUv.y*3.-uTime*.55+(tw+hw)*2.5+decay*3.+uHue;
-      vec3 c=vec3(.5+.5*cos(ph),.5+.5*cos(ph+2.094),.5+.5*cos(ph+4.189));
-
-      float pulse=.5+.5*sin(uTime*1.9);
-      float ig=.5+.5*sin(uTime*.7+vUv.y*4.);
-      vec3 col=c*(.15+f*.55)+c*pulse*f*.5+c*decay*.6+c*hs*.5
-              +vec3(.3,.6,1.)*ig*(1.-abs(dot(normalize(vN),normalize(vV))))*.12;
-      float a=clamp((.04+f*.6+pulse*f*.25+decay*.3+hs*.25)*uReveal,0.,.93);
-      gl_FragColor=vec4(col,a);
-    }`
-});
-
-const mesh=new THREE.Mesh(buildGeo(),mat);
-scene.add(mesh);
-
-// ── Anel de varredura ────────────────────────────────────────
-const ringGeo=new THREE.RingGeometry(0.18,0.22,64);
-const ringMat=new THREE.MeshBasicMaterial({
-  color:0x88ccff, transparent:true, opacity:0, side:THREE.DoubleSide
-});
-const ring=new THREE.Mesh(ringGeo,ringMat);
-ring.rotation.x=-Math.PI/2;
-scene.add(ring);
-
-// ── Estado de varredura ───────────────────────────────────────
-let scanning=false, locked=false, scanAccum=0;
-const SCAN_NEEDED=2.0; // segundos de superfície estável para travar
-
-// ── Raycaster (toque na bolha) ───────────────────────────────
-const rc=new THREE.Raycaster(), pt=new THREE.Vector2();
-const clock=new THREE.Clock();
-let hue=0, lastT=0;
-
-window.addEventListener('click', e=>{
-  if (!xrSess||!locked) return;
-  const x=e.clientX, y=e.clientY;
-  pt.x=(x/innerWidth)*2-1; pt.y=-(y/innerHeight)*2+1;
-  rc.setFromCamera(pt,camera);
-  if (rc.intersectObject(mesh,false).length){
-    mat.uniforms.uTouch.value=clock.getElapsedTime();
-    hue+=Math.PI*.72; mat.uniforms.uHue.value=hue;
-  }
-});
-
-// ── AR ───────────────────────────────────────────────────────
-let xrSess=null, xrRef=null, hitSrc=null;
-const tapEl=document.getElementById('tap');
-const errEl=document.getElementById('err');
-
-function showErr(msg){ errEl.innerHTML=msg; errEl.style.display='block'; }
-
-function setupSession(session) {
-  xrSess=session;
-  renderer.xr.setReferenceSpaceType('local-floor');
-  renderer.xr.setSession(session)
-    .then(()=>session.requestReferenceSpace('local-floor'))
-    .then(ref=>{
-      xrRef=ref;
-      return session.requestReferenceSpace('viewer')
-        .then(vs=>session.requestHitTestSource({space:vs}))
-        .catch(()=>null);
-    }).then(hs=>{
-      hitSrc=hs;
-      scanning=true; locked=false; scanAccum=0;
-      mat.uniforms.uReveal.value=0;
-      lastT=clock.getElapsedTime();
-      tapEl.classList.add('hidden');
-      renderer.domElement.style.display='block';
-    }).catch(e=>showErr(e.message));
-
-  session.addEventListener('end',()=>{
-    xrSess=null; xrRef=null; hitSrc=null;
-    scanning=false; locked=false; scanAccum=0;
-    mat.uniforms.uHand.value=-1;
-    mat.uniforms.uReveal.value=0;
-    ringMat.opacity=0;
-    renderer.domElement.style.display='none';
-    tapEl.classList.remove('hidden');
+  // ── Shader iridescente ─────────────────────────────────────
+  const mat = new THREE.ShaderMaterial({
+    transparent:true, side:THREE.DoubleSide, depthWrite:false,
+    uniforms:{
+      uTime:{value:0}, uTouch:{value:-99},
+      uHue:{value:0}
+    },
+    vertexShader:`
+      varying vec3 vN,vV; varying vec2 vUv;
+      void main(){
+        vUv=uv; vN=normalize(normalMatrix*normal);
+        vec4 mv=modelViewMatrix*vec4(position,1.);
+        vV=normalize(-mv.xyz); gl_Position=projectionMatrix*mv;
+      }`,
+    fragmentShader:`
+      uniform float uTime,uTouch,uHue;
+      varying vec3 vN,vV; varying vec2 vUv;
+      void main(){
+        float f=pow(1.-abs(dot(normalize(vN),normalize(vV))),1.3);
+        float dt=uTime-uTouch, alive=step(dt,2.5);
+        float decay=max(0.,1.-dt*.5)*alive;
+        float tw=sin(dt*14.-vUv.y*10.)*decay*.65;
+        float ph=f*6.5+vUv.y*3.-uTime*.55+tw*2.5+decay*3.+uHue;
+        vec3 c=vec3(.5+.5*cos(ph),.5+.5*cos(ph+2.094),.5+.5*cos(ph+4.189));
+        float pulse=.5+.5*sin(uTime*1.9);
+        float ig=.5+.5*sin(uTime*.7+vUv.y*4.);
+        vec3 col=c*(.15+f*.55)+c*pulse*f*.5+c*decay*.6
+                +vec3(.3,.6,1.)*ig*(1.-abs(dot(normalize(vN),normalize(vV))))*.12;
+        float a=clamp(.04+f*.6+pulse*f*.25+decay*.3,0.,.93);
+        gl_FragColor=vec4(col,a);
+      }`
   });
-}
 
-tapEl.addEventListener('click',()=>{
-  if (xrSess) return;
-  if (!navigator.xr){ showErr('WebXR indisponível — use Quest Browser'); return; }
-  navigator.xr.requestSession('immersive-ar',{
-    requiredFeatures:['local'],
-    optionalFeatures:['local-floor','hit-test','hand-tracking']
-  }).then(setupSession).catch(e=>{ alert('Erro: '+(e.message||String(e))); });
-});
+  const mesh = new THREE.Mesh(buildGeo(), mat);
 
-// ── Loop ─────────────────────────────────────────────────────
-const _hp=new THREE.Vector3();
+  // ── MindAR ────────────────────────────────────────────────
+  const mindarThree = new window.MINDAR.IMAGE.MindARThree({
+    container: document.body,
+    imageTargetSrc: './targets.mind',
+    maxTrack: 1,
+    uiLoading: 'no',
+    uiScanning: 'no',
+    uiError: 'no',
+  });
 
-renderer.setAnimationLoop((ts,frame)=>{
-  const t=clock.getElapsedTime();
-  const dt=t-lastT; lastT=t;
-  mat.uniforms.uTime.value=t;
+  const { renderer, scene, camera } = mindarThree;
 
-  if (frame&&xrRef) {
+  // Ancora 0 = primeira imagem no .mind (a escultura)
+  const anchor = mindarThree.addAnchor(0);
+  anchor.group.add(mesh);
 
-    // ── Fase de varredura ──
-    if (scanning&&hitSrc) {
-      const hits=frame.getHitTestResults(hitSrc);
-      if (hits.length>0) {
-        const p=hits[0].getPose(xrRef);
-        if (p) {
-          // anel segue a superfície detectada
-          ring.position.set(p.transform.position.x, p.transform.position.y+0.003, p.transform.position.z);
-          scanAccum+=dt;
+  // ── Interação por toque ────────────────────────────────────
+  const clock = new THREE.Clock();
+  let hue = 0;
 
-          // pulso do anel aumenta conforme aproxima do lock
-          const progress=Math.min(scanAccum/SCAN_NEEDED,1);
-          const pulse=0.6+0.4*Math.sin(t*6);
-          ringMat.opacity=0.3+progress*0.5*pulse;
-          ring.scale.setScalar(1+0.08*Math.sin(t*5));
+  const rc = new THREE.Raycaster();
+  const pt = new THREE.Vector2();
 
-          if (scanAccum>=SCAN_NEEDED) {
-            // LOCK: bolha aparece sobre a posição encontrada
-            mesh.position.set(p.transform.position.x, p.transform.position.y+0.004, p.transform.position.z);
-            scanning=false; locked=true;
-            hitSrc.cancel(); hitSrc=null;
-          }
-        }
-      } else {
-        // superfície perdida: reset acumulador
-        scanAccum=Math.max(0,scanAccum-dt*2);
-        ringMat.opacity=Math.max(0,ringMat.opacity-dt);
-      }
+  window.addEventListener('click', e => {
+    pt.x=(e.clientX/innerWidth)*2-1;
+    pt.y=-(e.clientY/innerHeight)*2+1;
+    rc.setFromCamera(pt, camera);
+    if (rc.intersectObject(mesh, false).length) {
+      mat.uniforms.uTouch.value = clock.getElapsedTime();
+      hue += Math.PI * 0.72;
+      mat.uniforms.uHue.value = hue;
     }
+  });
 
-    // ── Fade-in da bolha após lock ──
-    if (locked) {
-      // ring desaparece
-      ringMat.opacity=Math.max(0,ringMat.opacity-dt*2);
-      // bolha aparece
-      mat.uniforms.uReveal.value=Math.min(1,mat.uniforms.uReveal.value+dt*0.6);
-    }
-
-    // ── Hand tracking ──
-    const sess=renderer.xr.getSession();
-    let minD=-1;
-    for (const src of sess.inputSources) {
-      if (!src.hand) continue;
-      for (const joint of ['index-finger-tip','middle-finger-tip','wrist']) {
-        const j=src.hand.get(joint);
-        if (!j) continue;
-        const pose=frame.getJointPose(j,xrRef);
-        if (!pose) continue;
-        const pp=pose.transform.position;
-        const dx=pp.x-mesh.position.x, dz=pp.z-mesh.position.z;
-        const d=Math.sqrt(dx*dx+dz*dz);
-        if (minD<0||d<minD) minD=d;
-      }
-    }
-    mat.uniforms.uHand.value=minD;
+  // ── Start ─────────────────────────────────────────────────
+  try {
+    await mindarThree.start();
+    loading.classList.add('hidden');
+  } catch(e) {
+    loading.innerHTML = '<p style="color:rgba(255,255,255,.4);font:12px sans-serif;letter-spacing:2px;text-align:center;padding:20px">'
+      + (e.message || 'erro ao iniciar câmera') + '</p>';
+    return;
   }
 
-  renderer.render(scene,camera);
-});
-
-window.addEventListener('resize',()=>{
-  camera.aspect=innerWidth/innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth,innerHeight);
+  // ── Loop ──────────────────────────────────────────────────
+  renderer.setAnimationLoop(() => {
+    mat.uniforms.uTime.value = clock.getElapsedTime();
+    renderer.render(scene, camera);
+  });
 });
 </script>
 </body>

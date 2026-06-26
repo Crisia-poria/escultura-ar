@@ -17,11 +17,17 @@
     #st{position:fixed;bottom:32px;left:50%;transform:translateX(-50%);
       color:rgba(255,255,255,.55);font:12px/1.5 monospace;letter-spacing:.5px;
       display:none;text-align:center;pointer-events:none;}
+    #exit{position:fixed;top:18px;right:18px;width:36px;height:36px;
+      border-radius:50%;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);
+      cursor:pointer;display:none;align-items:center;justify-content:center;
+      font-size:16px;color:rgba(255,255,255,.6);backdrop-filter:blur(4px);}
+    #exit:active{background:rgba(255,255,255,.25);}
   </style>
 </head>
 <body>
 <button id="tap" aria-label="iniciar AR"></button>
 <div id="st"></div>
+<button id="exit" aria-label="sair do AR">✕</button>
 
 <script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.150.0/build/three.module.js"}}</script>
 <script type="module">
@@ -301,6 +307,8 @@ let lastT=0;
 
 const tapEl=document.getElementById('tap');
 const stEl=document.getElementById('st');
+const exitEl=document.getElementById('exit');
+exitEl.addEventListener('click',()=>{if(xrSess)xrSess.end();});
 function status(m){stEl.textContent=m;stEl.style.display=m?'block':'none';}
 
 // ── Pré-carrega marcador como ImageBitmap ──────────────────────
@@ -330,7 +338,7 @@ function setupSession(session){
       mat.uniforms.uReveal.value=0;haloMat.uniforms.uReveal.value=0;
       poolMat.uniforms.uFill.value=0;
       lastT=clock.getElapsedTime();
-      tapEl.classList.add('hidden');renderer.domElement.style.display='block';
+      tapEl.classList.add('hidden');renderer.domElement.style.display='block';exitEl.style.display='flex';
       status('Olhe para a escultura e aguarde…');
       return session.requestReferenceSpace('viewer')
         .then(vs=>session.requestHitTestSource({space:vs}))
@@ -344,7 +352,7 @@ function setupSession(session){
     mat.uniforms.uReveal.value=0;mat.uniforms.uHand.value=-1;
     haloMat.uniforms.uReveal.value=0;ringMat.opacity=0;
     [...handJointsL,...handJointsR].forEach(j=>j.visible=false);
-    renderer.domElement.style.display='none';tapEl.classList.remove('hidden');
+    renderer.domElement.style.display='none';tapEl.classList.remove('hidden');exitEl.style.display='none';
     prevD.left=2;prevD.right=2;depthCandidates=[];status('');
   });
 }

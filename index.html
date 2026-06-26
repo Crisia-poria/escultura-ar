@@ -7,46 +7,35 @@
   <style>
     *{margin:0;padding:0;box-sizing:border-box;}
     html,body{width:100%;height:100%;background:#000;overflow:hidden;}
-    #ar-container{position:fixed;inset:0;}
-    #tap{position:fixed;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;
+    canvas{position:fixed;inset:0;width:100%!important;height:100%!important;}
+    #tap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
       cursor:pointer;background:transparent;border:none;outline:none;}
     #tap::after{content:'';width:44px;height:44px;border:1px solid rgba(255,255,255,.2);
       border-radius:50%;animation:br 3s ease-in-out infinite;}
     @keyframes br{0%,100%{opacity:.2;transform:scale(1);}50%{opacity:.5;transform:scale(1.12);}}
     #tap.hidden{display:none;}
-    #err{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);z-index:20;
-      color:rgba(255,255,255,.6);font:13px/1.5 sans-serif;display:none;text-align:center;
-      background:rgba(0,0,0,.5);padding:8px 14px;border-radius:8px;}
+    #st{position:fixed;bottom:32px;left:50%;transform:translateX(-50%);
+      color:rgba(255,255,255,.55);font:12px/1.5 monospace;letter-spacing:.5px;
+      display:none;text-align:center;pointer-events:none;}
   </style>
 </head>
 <body>
-<div id="ar-container"></div>
-<button id="tap" aria-label="iniciar"></button>
-<div id="err"></div>
+<button id="tap" aria-label="iniciar AR"></button>
+<div id="st"></div>
 
-<!-- Three.js e MindAR como scripts globais (não módulos) -->
-<script src="https://cdn.jsdelivr.net/npm/three@0.150.0/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"></script>
+<script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.150.0/build/three.module.js"}}</script>
+<script type="module">
+import * as THREE from 'three';
 
-<script>
-// ── Perfil: meio-domo de bolha de sabão ───────────────────────
+// ── Perfil ────────────────────────────────────────────────────
 const PROFILE=[
-  [0.00,0.010,0.008],
-  [0.04,0.165,0.155],
-  [0.10,0.330,0.315],
-  [0.19,0.445,0.430],
-  [0.29,0.490,0.475],
-  [0.40,0.510,0.495],
-  [0.50,0.515,0.500],
-  [0.60,0.510,0.495],
-  [0.71,0.488,0.472],
-  [0.81,0.432,0.416],
-  [0.90,0.318,0.302],
-  [0.96,0.155,0.140],
+  [0.00,0.010,0.008],[0.04,0.165,0.155],[0.10,0.330,0.315],
+  [0.19,0.445,0.430],[0.29,0.490,0.475],[0.40,0.510,0.495],
+  [0.50,0.515,0.500],[0.60,0.510,0.495],[0.71,0.488,0.472],
+  [0.81,0.432,0.416],[0.90,0.318,0.302],[0.96,0.155,0.140],
   [1.00,0.010,0.008],
 ];
-const HEIGHT=1.55,SLICES=80,STACKS=120;
-const MAX_RX=0.515,MAX_RZ=0.500;
+const HEIGHT=1.55,SLICES=80,STACKS=120,MAX_RX=0.515,MAX_RZ=0.500;
 
 function interp(t){
   for(let i=0;i<PROFILE.length-1;i++){
@@ -56,7 +45,6 @@ function interp(t){
   return PROFILE.at(-1).slice(1);
 }
 
-// Apenas metade superior (ângulo 0→π)
 function buildGeo(){
   const pos=[],nor=[],uv=[],idx=[];
   for(let i=0;i<=STACKS;i++){
@@ -84,15 +72,22 @@ function buildGeo(){
   g.setIndex(idx);return g;
 }
 
+// ── Renderer ──────────────────────────────────────────────────
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+renderer.xr.enabled=true;
+renderer.domElement.style.display='none';
+document.body.insertBefore(renderer.domElement,document.getElementById('tap'));
+const scene=new THREE.Scene();
+const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,.01,20);
+
 // ── Shader ────────────────────────────────────────────────────
 const mat=new THREE.ShaderMaterial({
   transparent:true,side:THREE.DoubleSide,depthWrite:false,
   blending:THREE.CustomBlending,blendEquation:THREE.AddEquation,
   blendSrc:THREE.SrcAlphaFactor,blendDst:THREE.OneMinusSrcAlphaFactor,
-  uniforms:{
-    uTime:{value:0},uTouch:{value:-99},uHue:{value:0},
-    uReveal:{value:0},uHand:{value:-1},uWind:{value:0}
-  },
+  uniforms:{uTime:{value:0},uTouch:{value:-99},uHue:{value:0},uReveal:{value:0},uWind:{value:0},uHand:{value:-1}},
   vertexShader:`
     uniform float uTime,uTouch,uReveal,uWind;
     varying vec3 vN,vV;varying vec2 vUv;varying float vDisp;
@@ -120,15 +115,13 @@ const mat=new THREE.ShaderMaterial({
       if(uReveal<=0.)discard;
       vec3 N=normalize(vN),V=normalize(vV);
       float NdotV=abs(dot(N,V));
-      float rim=pow(1.-NdotV,1.8);
-      float core=pow(NdotV,3.5);
+      float rim=pow(1.-NdotV,1.8),core=pow(NdotV,3.5);
       float dt=uTime-uTouch,alive=step(dt,7.);
       float decay=max(0.,1.-dt*.14)*alive;
       float wf=dt*.30;
       float waveGlow=exp(-pow(vUv.y-wf,2.)*14.)*decay;
       float ph=rim*7.+vUv.y*3.-uTime*.28+vDisp*38.+uHue+waveGlow*2.;
       vec3 iri=vec3(.5+.32*cos(ph),.5+.32*cos(ph+2.09),.5+.32*cos(ph+4.19));
-      // Aura do metal: base quente (contato com escultura)
       float metalBase=pow(1.-vUv.y,3.)*uReveal;
       float metalPulse=(.5+.5*sin(uTime*1.1-vUv.y*5.))*pow(1.-vUv.y,1.5);
       float emanate=sin(vUv.y*6.28-uTime*1.4)*exp(-vUv.y*3.)*.5+.5;
@@ -136,166 +129,278 @@ const mat=new THREE.ShaderMaterial({
                    +vec3(.20,.50,.90)*emanate*pow(1.-vUv.y,2.)*.35;
       float windVis=sin(uTime*.7-vUv.y*3.5+uWind)*(.5+.5*sin(uTime*.22))*rim*.3;
       float pulse=.5+.5*sin(uTime*1.3);
-      vec3 waveCol=iri*waveGlow*1.8;
-      vec3 col=iri*(rim*.70+pulse*rim*.2+decay*.4+windVis)+metalCol+waveCol
-              +vec3(.02,.06,.12)*core*.2;
+      vec3 col=iri*(rim*.70+pulse*rim*.2+decay*.4+windVis)+metalCol
+              +iri*waveGlow*1.8+vec3(.02,.06,.12)*core*.2;
       float a=(rim*.68+core*.05+waveGlow*.38+pulse*rim*.15+metalBase*.18+metalPulse*.10)*uReveal;
       gl_FragColor=vec4(col,clamp(a,0.,.85));
     }`
 });
 
-// ── Halo no chão ─────────────────────────────────────────────
+// ── Halo ──────────────────────────────────────────────────────
 const haloMat=new THREE.ShaderMaterial({
   transparent:true,depthWrite:false,side:THREE.DoubleSide,
   uniforms:{uTime:{value:0},uReveal:{value:0}},
-  vertexShader:`varying vec2 vUv2;void main(){vUv2=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
-  fragmentShader:`
-    uniform float uTime,uReveal;varying vec2 vUv2;
-    void main(){
-      float r=vUv2.x;
-      float ph=r*5.-uTime*.4;
+  vertexShader:`varying vec2 vU;void main(){vU=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
+  fragmentShader:`uniform float uTime,uReveal;varying vec2 vU;
+    void main(){float r=vU.x;float ph=r*5.-uTime*.4;
       vec3 c=vec3(.5+.3*cos(ph),.5+.3*cos(ph+2.09),.5+.3*cos(ph+4.19));
-      float pulse=.5+.5*sin(uTime*1.2+r*6.);
-      float a=(1.-r)*.28*pulse*uReveal;
-      gl_FragColor=vec4(c,clamp(a,0.,.4));
-    }`
+      float a=(1.-r)*.28*(.5+.5*sin(uTime*1.2+r*6.))*uReveal;
+      gl_FragColor=vec4(c,clamp(a,0.,.4));}`
 });
-const halo=new THREE.Mesh(new THREE.RingGeometry(.05,1.2,80),haloMat);
-// Sem rotação extra — no espaço do anchor o plano da imagem já é horizontal
+const halo=new THREE.Mesh(new THREE.RingGeometry(.05,.58,80),haloMat);
+halo.rotation.x=-Math.PI/2;halo.position.y=.004;scene.add(halo);
 
 // ── Mesh ──────────────────────────────────────────────────────
-const mesh=new THREE.Mesh(buildGeo(),mat);
-// Rotação para alinhar o domo apontando para cima no espaço do anchor
-// No anchor do MindAR: XY = plano da imagem, Z = normal (para cima)
-// Nossa geometria: domo abre em +Y — após Rx(π/2) o +Y vira +Z (para cima) ✓
-mesh.rotation.x=Math.PI/2;
-// Escala: 1 unidade MindAR = largura da imagem alvo
-// A bolha deve cobrir a escultura e ir além — escala generosa
-mesh.scale.set(3.0,3.0,3.0);
-halo.scale.set(2.5,2.5,2.5);
+const mesh=new THREE.Mesh(buildGeo(),mat);scene.add(mesh);
 
-// ── Som: metal wobble ─────────────────────────────────────────
+// ── Anel de varredura ─────────────────────────────────────────
+const ringMat=new THREE.MeshBasicMaterial({color:0x88ccff,transparent:true,opacity:0,side:THREE.DoubleSide});
+const ring=new THREE.Mesh(new THREE.RingGeometry(.20,.25,64),ringMat);
+ring.rotation.x=-Math.PI/2;scene.add(ring);
+
+// ── Joints das mãos ───────────────────────────────────────────
+const JNAMES=['wrist',
+  'thumb-metacarpal','thumb-phalanx-proximal','thumb-phalanx-distal','thumb-tip',
+  'index-finger-metacarpal','index-finger-phalanx-proximal','index-finger-phalanx-intermediate','index-finger-phalanx-distal','index-finger-tip',
+  'middle-finger-metacarpal','middle-finger-phalanx-proximal','middle-finger-phalanx-intermediate','middle-finger-phalanx-distal','middle-finger-tip',
+  'ring-finger-metacarpal','ring-finger-phalanx-proximal','ring-finger-phalanx-intermediate','ring-finger-phalanx-distal','ring-finger-tip',
+  'pinky-finger-metacarpal','pinky-finger-phalanx-proximal','pinky-finger-phalanx-intermediate','pinky-finger-phalanx-distal','pinky-finger-tip',
+];
+const TIP_NAMES=new Set(['index-finger-tip','middle-finger-tip','thumb-tip','ring-finger-tip','pinky-finger-tip']);
+const handMat=new THREE.MeshBasicMaterial({color:0xaaddff,transparent:true,opacity:.38});
+const jointGeo=new THREE.SphereGeometry(.007,8,8);
+function makeJoints(){return JNAMES.map(()=>{const s=new THREE.Mesh(jointGeo,handMat);s.visible=false;scene.add(s);return s;});}
+const handJointsL=makeJoints(),handJointsR=makeJoints();
+
+// ── Som ───────────────────────────────────────────────────────
 let audioCtx=null;
-let hue=0;
-const clock=new THREE.Clock();
-
+function ensureAudio(){
+  if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+  if(audioCtx.state==='suspended')audioCtx.resume();
+}
 function playMetalWobble(vol=1.0){
-  if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();
-  if(audioCtx.state==='suspended') audioCtx.resume();
-  const ac=audioCtx,now=ac.currentTime,dur=4.0;
+  ensureAudio();const ac=audioCtx,now=ac.currentTime,dur=4.0;
   const lfo=ac.createOscillator(),lfoG=ac.createGain();
-  lfo.frequency.value=3.8;lfoG.gain.value=22;
-  lfo.connect(lfoG);lfo.start(now);lfo.stop(now+dur);
+  lfo.frequency.value=3.8;lfoG.gain.value=22;lfo.connect(lfoG);lfo.start(now);lfo.stop(now+dur);
   [[72,1.0],[144,.55],[216,.32],[340,.18],[560,.08]].forEach(([f,g])=>{
-    const osc=ac.createOscillator(),gain=ac.createGain();
-    osc.type='sawtooth';osc.frequency.value=f;
-    lfoG.connect(osc.frequency);
-    gain.gain.setValueAtTime(0,now);
-    gain.gain.linearRampToValueAtTime(vol*g*.35,now+.05);
-    gain.gain.exponentialRampToValueAtTime(.0001,now+dur);
-    osc.connect(gain);gain.connect(ac.destination);
-    osc.start(now);osc.stop(now+dur);
+    const o=ac.createOscillator(),gn=ac.createGain();
+    o.type='sawtooth';o.frequency.value=f;lfoG.connect(o.frequency);
+    gn.gain.setValueAtTime(0,now);gn.gain.linearRampToValueAtTime(vol*g*.35,now+.05);
+    gn.gain.exponentialRampToValueAtTime(.0001,now+dur);
+    o.connect(gn);gn.connect(ac.destination);o.start(now);o.stop(now+dur);
   });
 }
 
-// ── Iniciar ───────────────────────────────────────────────────
-const tapEl=document.getElementById('tap');
-const errEl=document.getElementById('err');
+// ── Toque na bolha ────────────────────────────────────────────
+const prevD={left:2,right:2};
+let hue=0;
+function ellD(p){
+  if(!locked)return 2;
+  const lx=(p.x-mesh.position.x)/MAX_RX,ly=p.y/MAX_RZ,lz=(p.z-mesh.position.z)/(HEIGHT/2);
+  return Math.sqrt(lx*lx+ly*ly+lz*lz);
+}
+function updateHands(frame,joints,hand,ref,side){
+  let minD=-1;
+  JNAMES.forEach((name,i)=>{
+    const jt=hand.get(name);if(!jt){joints[i].visible=false;return;}
+    const pose=frame.getJointPose(jt,ref);if(!pose){joints[i].visible=false;return;}
+    const p=pose.transform.position;
+    joints[i].position.set(p.x,p.y,p.z);joints[i].visible=true;
+    if(locked){const dx=p.x-mesh.position.x,dz=p.z-mesh.position.z,d=Math.sqrt(dx*dx+dz*dz);if(minD<0||d<minD)minD=d;}
+    if(TIP_NAMES.has(name)&&locked){
+      const d=ellD(p);
+      if(prevD[side]>1.05&&d<=1.0){
+        playMetalWobble(.9);mat.uniforms.uTouch.value=clock.getElapsedTime();
+        hue+=Math.PI*.72;mat.uniforms.uHue.value=hue;
+      }
+      prevD[side]=d<prevD[side]?d:Math.min(2,prevD[side]+.03);
+    }
+  });
+  return minD;
+}
 
-// Verifica se MindAR carregou
-window.addEventListener('load',()=>{
-  if(!window.MINDAR||!window.MINDAR.IMAGE){
-    errEl.textContent='MindAR não carregou. Verifique conexão.';
-    errEl.style.display='block';
+// ── Depth sensing: detecta escultura elevada no chão ──────────
+const _projInv=new THREE.Matrix4(),_camMat=new THREE.Matrix4(),_v4=new THREE.Vector4();
+let depthCandidates=[],depthScanTime=0,hasDepthSensing=false;
+
+function depthToWorld(u,v,depthM,view){
+  // Unproject (u,v) em coordenadas de tela para ponto no mundo
+  _projInv.fromArray(view.projectionMatrix).invert();
+  _camMat.fromArray(view.transform.matrix);
+  const xN=u*2-1, yN=-(v*2-1);
+  _v4.set(xN,yN,-1,1).applyMatrix4(_projInv);
+  const w=_v4.w||1;
+  const dir=new THREE.Vector3(_v4.x/w,_v4.y/w,_v4.z/w).normalize();
+  dir.multiplyScalar(depthM).applyMatrix4(_camMat);
+  return dir; // posição no espaço world
+}
+
+function scanDepth(frame,viewerPose){
+  if(!viewerPose)return null;
+  for(const view of viewerPose.views){
+    const di=frame.getDepthInformation(view);
+    if(!di)continue;
+    hasDepthSensing=true;
+    // Grade 6×6 amostras distribuídas pela view
+    for(let ui=0;ui<6;ui++)for(let vi=0;vi<6;vi++){
+      const u=(ui+.5)/6,v=(vi+.5)/6;
+      let d;
+      try{d=di.getDepthInMeters(u,v);}catch(e){continue;}
+      if(!d||d<.1||d>5)continue;
+      const wp=depthToWorld(u,v,d,view);
+      // Filtra: entre 4cm e 45cm acima do chão → escultura
+      if(wp.y>=.04&&wp.y<=.45){
+        depthCandidates.push(new THREE.Vector3(wp.x,0,wp.z));
+      }
+    }
   }
+  // Centróide estável após acumular ≥20 amostras
+  if(depthCandidates.length>=20){
+    const c=new THREE.Vector3();
+    depthCandidates.forEach(p=>c.add(p));
+    c.divideScalar(depthCandidates.length);
+    depthCandidates=[];
+    return c;
+  }
+  return null;
+}
+
+// ── Estado ────────────────────────────────────────────────────
+let xrSess=null,xrRef=null,hitSrc=null;
+let scanning=false,locked=false,scanAccum=0;
+const clock=new THREE.Clock();
+let lastT=0;
+
+const tapEl=document.getElementById('tap');
+const stEl=document.getElementById('st');
+function status(m){stEl.textContent=m;stEl.style.display=m?'block':'none';}
+
+function lock(px,py,pz){
+  mesh.position.set(px,py||0,pz);
+  halo.position.set(px,(py||0)+.004,pz);
+  locked=true;scanning=false;
+  if(hitSrc){hitSrc.cancel();hitSrc=null;}
+  status('');
+}
+
+function setupSession(session){
+  xrSess=session;
+  renderer.xr.setReferenceSpaceType('local-floor');
+  renderer.xr.setSession(session)
+    .then(()=>session.requestReferenceSpace('local-floor'))
+    .then(ref=>{
+      xrRef=ref;
+      return session.requestReferenceSpace('viewer')
+        .then(vs=>session.requestHitTestSource({space:vs}))
+        .catch(()=>null);
+    }).then(hs=>{
+      hitSrc=hs;scanning=true;locked=false;scanAccum=0;depthScanTime=0;
+      mat.uniforms.uReveal.value=0;haloMat.uniforms.uReveal.value=0;
+      lastT=clock.getElapsedTime();
+      tapEl.classList.add('hidden');renderer.domElement.style.display='block';
+      status('Procurando escultura…');
+    }).catch(e=>status('Erro: '+e.message));
+
+  session.addEventListener('end',()=>{
+    xrSess=null;xrRef=null;hitSrc=null;
+    scanning=false;locked=false;scanAccum=0;
+    mat.uniforms.uReveal.value=0;mat.uniforms.uHand.value=-1;
+    haloMat.uniforms.uReveal.value=0;ringMat.opacity=0;
+    [...handJointsL,...handJointsR].forEach(j=>j.visible=false);
+    renderer.domElement.style.display='none';tapEl.classList.remove('hidden');
+    prevD.left=2;prevD.right=2;depthCandidates=[];status('');
+  });
+}
+
+tapEl.addEventListener('click',()=>{
+  if(xrSess)return;
+  if(!navigator.xr){status('WebXR indisponível');return;}
+  ensureAudio();
+  navigator.xr.requestSession('immersive-ar',{
+    requiredFeatures:['local-floor'],
+    optionalFeatures:['depth-sensing','hit-test','hand-tracking','dom-overlay'],
+    depthSensing:{
+      usagePreference:['cpu-optimized'],
+      dataFormatPreference:['luminance-alpha','float32']
+    },
+    domOverlay:{root:document.body}
+  }).then(setupSession).catch(e=>alert('Erro AR: '+(e.message||e)));
 });
 
-function status(msg){errEl.textContent=msg;errEl.style.display='block';}
+// ── Loop ──────────────────────────────────────────────────────
+renderer.setAnimationLoop((ts,frame)=>{
+  const t=clock.getElapsedTime();
+  const dt=Math.min(t-lastT,.05);lastT=t;
+  mat.uniforms.uTime.value=t;mat.uniforms.uWind.value=t;haloMat.uniforms.uTime.value=t;
 
-tapEl.addEventListener('click',async()=>{
-  tapEl.classList.add('hidden');
+  if(frame&&xrRef){
+    const viewerPose=frame.getViewerPose(xrRef);
 
-  // Passo 1: MindAR carregado?
-  status('1/4 — verificando MindAR…');
-  if(!window.MINDAR||!window.MINDAR.IMAGE){
-    status('ERRO: script MindAR não carregou. Verifique conexão e recarregue.');
-    tapEl.classList.remove('hidden');return;
-  }
-  status('2/4 — carregando targets.mind…');
+    if(!locked){
+      depthScanTime+=dt;
 
-  // Passo 2: arquivo targets.mind acessível?
-  try{
-    const r=await fetch('targets.mind');
-    if(!r.ok) throw new Error('HTTP '+r.status);
-  }catch(e){
-    status('ERRO targets.mind: '+e.message);
-    tapEl.classList.remove('hidden');return;
-  }
-  status('3/4 — pedindo câmera…');
+      // ── Depth sensing: detecta escultura automaticamente ──
+      if(depthScanTime<5){
+        const found=scanDepth(frame,viewerPose);
+        if(found){
+          lock(found.x,0,found.z);
+          status('Escultura encontrada ✓');
+          return;
+        }
+        if(hasDepthSensing){
+          status(`Procurando escultura… aponte para ela (${Math.ceil(5-depthScanTime)}s)`);
+        } else {
+          status('Depth sensor indisponível — varredura manual');
+        }
+      }
 
-  if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();
-
-  const MindARThree=window.MINDAR.IMAGE.MindARThree;
-  let mindarThree;
-  try{
-    mindarThree=new MindARThree({
-      container:document.getElementById('ar-container'),
-      imageTargetSrc:'targets.mind',
-      maxTrack:1,
-      uiLoading:'yes',
-      uiScanning:'yes',
-    });
-  }catch(e){
-    status('ERRO MindAR init: '+(e.message||e));
-    tapEl.classList.remove('hidden');return;
-  }
-
-  const{renderer,scene,camera}=mindarThree;
-
-  // Adiciona malha e halo ao anchor da escultura (índice 0)
-  const anchor=mindarThree.addAnchor(0);
-  anchor.group.add(mesh);
-  anchor.group.add(halo);
-
-  // Fade-in quando detecta
-  anchor.onTargetFound=()=>{
-    mat.uniforms.uReveal.value=0;
-    haloMat.uniforms.uReveal.value=0;
-  };
-
-  // Toque na tela = interação com a bolha
-  renderer.domElement.addEventListener('click',()=>{
-    if(!anchor.group.visible)return;
-    playMetalWobble(.9);
-    mat.uniforms.uTouch.value=clock.getElapsedTime();
-    hue+=Math.PI*.72;mat.uniforms.uHue.value=hue;
-  });
-
-  try{
-    await mindarThree.start();
-  }catch(e){
-    errEl.textContent='Câmera: '+(e.message||e);errEl.style.display='block';
-    tapEl.classList.remove('hidden');return;
-  }
-
-  renderer.setAnimationLoop(()=>{
-    const t=clock.getElapsedTime();
-    mat.uniforms.uTime.value=t;
-    mat.uniforms.uWind.value=t;
-    haloMat.uniforms.uTime.value=t;
-
-    if(anchor.group.visible){
-      const rev=Math.min(1,mat.uniforms.uReveal.value+.016);
-      mat.uniforms.uReveal.value=rev;
-      haloMat.uniforms.uReveal.value=rev;
-    } else {
-      const rev=Math.max(0,mat.uniforms.uReveal.value-.016);
-      mat.uniforms.uReveal.value=rev;
-      haloMat.uniforms.uReveal.value=rev;
+      // ── Hit-test fallback após 5s sem depth ou sem sensor ──
+      if((depthScanTime>=5||!hasDepthSensing)&&hitSrc){
+        const hits=frame.getHitTestResults(hitSrc);
+        if(hits.length>0){
+          const p=hits[0].getPose(xrRef);
+          if(p){
+            ring.position.set(p.transform.position.x,p.transform.position.y+.003,p.transform.position.z);
+            scanAccum+=dt;
+            ringMat.opacity=(0.4+Math.min(scanAccum/1.5,.6))*(.7+.3*Math.sin(t*6));
+            ring.scale.setScalar(1+.06*Math.sin(t*5));
+            if(!hasDepthSensing) status('Aponte para a escultura e aguarde…');
+            if(scanAccum>=1.5){
+              lock(p.transform.position.x,p.transform.position.y,p.transform.position.z);
+            }
+          }
+        } else {
+          scanAccum=Math.max(0,scanAccum-dt*2);
+          ringMat.opacity=Math.max(0,ringMat.opacity-dt*2);
+        }
+      }
     }
 
-    renderer.render(scene,camera);
-  });
+    if(locked){
+      ringMat.opacity=Math.max(0,ringMat.opacity-dt*3);
+      const rev=Math.min(1,mat.uniforms.uReveal.value+dt*.4);
+      mat.uniforms.uReveal.value=rev;haloMat.uniforms.uReveal.value=rev;
+    }
+
+    const sess=renderer.xr.getSession();
+    let minD=-1;
+    for(const src of sess.inputSources){
+      if(src.hand){
+        const side=src.handedness==='left'?'left':'right';
+        const joints=src.handedness==='left'?handJointsL:handJointsR;
+        const d=updateHands(frame,joints,src.hand,xrRef,side);
+        if(d>=0&&(minD<0||d<minD))minD=d;
+      }
+    }
+    mat.uniforms.uHand.value=minD;
+  }
+
+  renderer.render(scene,camera);
+});
+
+window.addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
 });
 </script>
 </body>

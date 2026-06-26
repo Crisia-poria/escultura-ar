@@ -94,14 +94,17 @@ function buildGeo(){
     for(let j=0;j<=SLICES;j++){
       const a=2*Math.PI*j/SLICES, ca=Math.cos(a), sa=Math.sin(a);
 
-      // Perturbação orgânica — ondas de frequências diferentes no espaço UV
-      const bump = Math.sin(a*2.3+t*7.1)*0.018
-                 + Math.sin(a*1.1-t*4.7)*0.012
-                 + Math.sin(a*3.7+t*2.3)*0.008;
+      // Perturbação orgânica grande — x e z independentes, amplitudes altas
+      const bx = Math.sin(a*0.9 + t*5.2)*0.072
+               + Math.sin(a*1.8 - t*3.5)*0.048
+               + Math.sin(a*0.4 + t*9.1)*0.055
+               + Math.sin(a*3.1 - t*1.9)*0.022;
+      const bz = Math.sin(a*1.2 + t*4.0)*0.065
+               + Math.sin(a*0.6 - t*7.8)*0.050
+               + Math.sin(a*2.5 + t*2.7)*0.030
+               + Math.sin(a*3.8 - t*4.3)*0.018;
 
-      const rxb=rx+bump, rzb=rz+bump*0.8;
-
-      pos.push(rxb*ca, rzb*sa, -(t-0.5)*HEIGHT);
+      pos.push((rx+bx)*ca, (rz+bz)*sa, -(t-0.5)*HEIGHT);
 
       const[tx1,ty1,tz1]=[-rx*sa,0,rz*ca],[tx2,ty2,tz2]=[drx*ca,1,drz*sa];
       let nx=ty1*tz2-tz1*ty2, ny=tz1*tx2-tx1*tz2, nz=tx1*ty2-ty1*tx2;
@@ -311,6 +314,7 @@ let xrSess=null,xrRef=null,hitSrc=null;
 let scanning=false,locked=false,scanAccum=0;
 const clock=new THREE.Clock();
 let hue=0,lastT=0,handWasInside=false;
+let imgStableFrames=0,imgSumX=0,imgSumZ=0;
 
 const tapEl=document.getElementById('tap');
 const errEl=document.getElementById('err');
@@ -395,24 +399,23 @@ renderer.setAnimationLoop((ts,frame)=>{
 
   if(frame&&xrRef){
 
-    // ── Image tracking: posiciona bolha automático ──
-    if(frame.getImageTrackingResults){
+    // ── Image tracking: só aceita após 30 frames estáveis no chão ──
+    if(frame.getImageTrackingResults&&!locked){
       const imgResults=frame.getImageTrackingResults();
       for(const r of imgResults){
-        if(r.trackingState==='tracked'||r.trackingState==='emulated'){
+        if(r.trackingState==='tracked'){
           const pose=frame.getPose(r.imageSpace,xrRef);
-          if(pose){
-            mesh.position.set(
-              pose.transform.position.x,
-              pose.transform.position.y,
-              pose.transform.position.z
-            );
-            if(!locked){
+          if(pose&&pose.transform.position.y<0.25){
+            imgStableFrames++;
+            imgSumX+=pose.transform.position.x;
+            imgSumZ+=pose.transform.position.z;
+            if(imgStableFrames>=30){
+              mesh.position.set(imgSumX/30, 0, imgSumZ/30);
               locked=true; scanning=false;
               ringMat.opacity=0;
               if(hitSrc){hitSrc.cancel();hitSrc=null;}
             }
-          }
+          } else { imgStableFrames=0; imgSumX=0; imgSumZ=0; }
         }
       }
     }
@@ -469,9 +472,8 @@ renderer.setAnimationLoop((ts,frame)=>{
     }
     mat.uniforms.uHand.value=minD;
 
-    const handInside=minD>=0&&minD<0.4;
-    if(handInside&&!handWasInside) playMetal(0.5);
-    handWasInside=handInside;
+    // Som só por trigger — mão não dispara som, só visual
+    handWasInside=minD>=0&&minD<0.4;
   }
 
   renderer.render(scene,camera);
